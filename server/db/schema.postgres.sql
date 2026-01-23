@@ -140,6 +140,10 @@ CREATE TABLE IF NOT EXISTS business_hours (
     day_of_week INTEGER NOT NULL, -- 0=日曜, 1=月曜, ..., 6=土曜
     open_time TIME, -- NULLなら休診
     close_time TIME,
+    morning_open TIME,     -- 午前診療開始
+    morning_close TIME,    -- 午前診療終了
+    afternoon_open TIME,   -- 午後診療開始
+    afternoon_close TIME,  -- 午後診療終了
     is_closed BOOLEAN NOT NULL DEFAULT FALSE,
     UNIQUE(day_of_week)
 );

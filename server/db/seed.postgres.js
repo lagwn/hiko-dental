@@ -4,7 +4,12 @@
 
 require('dotenv').config({ path: require('path').join(__dirname, '..', '..', '.env') });
 
-const { Pool } = require('@neondatabase/serverless');
+const { Pool, neonConfig } = require('@neondatabase/serverless');
+const ws = require('ws');
+
+// WebSocket設定（これがないとNode.js環境からつながらない場合がある）
+neonConfig.webSocketConstructor = ws;
+
 const bcrypt = require('bcrypt');
 const fs = require('fs');
 const path = require('path');
@@ -53,16 +58,17 @@ async function seed() {
 
         // スタッフ
         const staffMembers = [
-            [1, '彦 太郎', '院長', 1],
-            [2, '山田 花子', '歯科医師', 2],
-            [3, '鈴木 一郎', '歯科衛生士', 3],
+            [1, '稲村昌伸', '院長', 1],
         ];
 
         for (const [id, name, title, sortOrder] of staffMembers) {
             await pool.query(`
                 INSERT INTO staff (id, name, title, sort_order)
                 VALUES ($1, $2, $3, $4)
-                ON CONFLICT (id) DO NOTHING
+                ON CONFLICT (id) DO UPDATE SET
+                    name = EXCLUDED.name,
+                    title = EXCLUDED.title,
+                    sort_order = EXCLUDED.sort_order
             `, [id, name, title, sortOrder]);
         }
         await pool.query(`SELECT setval('staff_id_seq', (SELECT MAX(id) FROM staff))`);
@@ -80,26 +86,34 @@ async function seed() {
         await pool.query(`SELECT setval('admins_id_seq', (SELECT MAX(id) FROM admins))`);
         console.log('✅ 管理者アカウントを登録しました（ユーザー名: admin, パスワード: admin123）');
 
-        // 営業時間（月〜土 9:00-18:00、日曜休診）
+        // 営業時間
+        // ダンプデータに基づく設定:
+        // 月・火・木・土: 10:00-13:00 / 15:00-19:00
+        // 水・日: 休診
+        // 金: 10:00-13:00 / 15:00-17:00
         const businessHours = [
-            [0, null, null, true],        // 日曜：休診
-            [1, '09:00', '18:00', false],  // 月曜
-            [2, '09:00', '18:00', false],  // 火曜
-            [3, '09:00', '18:00', false],  // 水曜
-            [4, '09:00', '18:00', false],  // 木曜
-            [5, '09:00', '18:00', false],  // 金曜
-            [6, '09:00', '13:00', false],  // 土曜（午前のみ）
+            [0, null, null, null, null, null, null, true],         // 日曜：休診
+            [1, '10:00', '19:00', '10:00', '13:00', '15:00', '19:00', false], // 月曜
+            [2, '10:00', '19:00', '10:00', '13:00', '15:00', '19:00', false], // 火曜
+            [3, null, null, null, null, null, null, true],         // 水曜：休診
+            [4, '10:00', '19:00', '10:00', '13:00', '15:00', '19:00', false], // 木曜
+            [5, '10:00', '17:00', '10:00', '13:00', '15:00', '17:00', false], // 金曜
+            [6, '10:00', '19:00', '10:00', '13:00', '15:00', '19:00', false], // 土曜
         ];
 
-        for (const [dayOfWeek, openTime, closeTime, isClosed] of businessHours) {
+        for (const [dayOfWeek, openTime, closeTime, mOpen, mClose, aOpen, aClose, isClosed] of businessHours) {
             await pool.query(`
-                INSERT INTO business_hours (day_of_week, open_time, close_time, is_closed)
-                VALUES ($1, $2, $3, $4)
+                INSERT INTO business_hours (day_of_week, open_time, close_time, morning_open, morning_close, afternoon_open, afternoon_close, is_closed)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                 ON CONFLICT (day_of_week) DO UPDATE SET
                     open_time = EXCLUDED.open_time,
                     close_time = EXCLUDED.close_time,
+                    morning_open = EXCLUDED.morning_open,
+                    morning_close = EXCLUDED.morning_close,
+                    afternoon_open = EXCLUDED.afternoon_open,
+                    afternoon_close = EXCLUDED.afternoon_close,
                     is_closed = EXCLUDED.is_closed
-            `, [dayOfWeek, openTime, closeTime, isClosed]);
+            `, [dayOfWeek, openTime, closeTime, mOpen, mClose, aOpen, aClose, isClosed]);
         }
         console.log('✅ 営業時間を登録しました');
 
