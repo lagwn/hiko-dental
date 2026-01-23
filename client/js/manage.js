@@ -1497,8 +1497,8 @@ const createModal = document.getElementById('createAppointmentModal');
 const createForm = document.getElementById('createAppointmentForm');
 
 // ボタンイベント
-document.getElementById('newAppointmentBtn')?.addEventListener('click', openCreateModal);
-document.getElementById('openCreateModalBtn')?.addEventListener('click', openCreateModal);
+document.getElementById('newAppointmentBtn')?.addEventListener('click', openCreateModalNew);
+document.getElementById('openCreateModalBtn')?.addEventListener('click', openCreateModalNew);
 
 document.getElementById('closeCreateModal')?.addEventListener('click', closeCreateModal);
 document.getElementById('createModalCancel')?.addEventListener('click', closeCreateModal);
@@ -1521,21 +1521,15 @@ async function openCreateModal() {
             `<option value="${s.id}">${escapeHtml(s.name)} (${s.duration || s.duration_minutes}分)</option>`
         ).join('');
 
-        // 時間プルダウン生成 (09:00〜19:00, 30分刻み)
-        const timeSelect = document.getElementById('newAptTime');
-        timeSelect.innerHTML = '';
-        const startHour = 9;
-        const endHour = 19;
-        for (let h = startHour; h < endHour; h++) {
-            const hStr = String(h).padStart(2, '0');
-            timeSelect.innerHTML += `<option value="${hStr}:00">${hStr}:00</option>`;
-            timeSelect.innerHTML += `<option value="${hStr}:30">${hStr}:30</option>`;
-        }
-
-        // 初期値（日付は今日、時間は次の30分枠）
+        // 初期値（日付は今日）
         const now = new Date();
         const dStr = formatDate(now); // YYYY-MM-DD
         document.getElementById('newAptDate').value = dStr;
+
+        // 空き枠更新
+        await updateAvailableTimes();
+
+
 
         // 次の枠を選択
         let nextMinutes = Math.ceil((now.getHours() * 60 + now.getMinutes()) / 30) * 30;
@@ -1595,5 +1589,77 @@ async function createAppointment() {
     } finally {
         btn.disabled = false;
         btn.textContent = originalText;
+    }
+}
+
+// 日付・メニュー変更時に空き枠を再取得
+document.getElementById('newAptDate')?.addEventListener('change', updateAvailableTimes);
+document.getElementById('newAptService')?.addEventListener('change', updateAvailableTimes);
+
+async function updateAvailableTimes() {
+    const dateStr = document.getElementById('newAptDate').value;
+    const serviceId = document.getElementById('newAptService').value;
+    const timeSelect = document.getElementById('newAptTime');
+
+    if (!dateStr || !serviceId) return;
+
+    // Loading表示
+    timeSelect.innerHTML = '<option value="">読み込み中...</option>';
+    timeSelect.disabled = true;
+
+    try {
+        // 空き枠APIを呼び出す
+        const result = await api(`/api/slots?date=${dateStr}&serviceId=${serviceId}`);
+        const slots = result.slots || [];
+
+        timeSelect.innerHTML = '';
+        timeSelect.disabled = false;
+
+        if (slots.length === 0) {
+            timeSelect.innerHTML = '<option value="">空き枠なし</option>';
+            return;
+        }
+
+        let hasAvailable = false;
+        slots.forEach(slot => {
+            if (slot.available) {
+                // そのまま追加
+                timeSelect.innerHTML += `<option value="${slot.time}">${slot.time}</option>`;
+                hasAvailable = true;
+            }
+        });
+
+        if (!hasAvailable) {
+            timeSelect.innerHTML = '<option value="">空き枠なし</option>';
+        }
+
+    } catch (error) {
+        console.error('空き枠取得エラー:', error);
+        timeSelect.innerHTML = '<option value="">取得エラー</option>';
+        timeSelect.disabled = false;
+    }
+}
+
+async function openCreateModalNew() {
+    // メニュー読み込み
+    try {
+        const services = await api('/api/services');
+        const select = document.getElementById('newAptService');
+        select.innerHTML = services.map(s =>
+            `<option value="${s.id}">${escapeHtml(s.name)} (${s.duration || s.duration_minutes}分)</option>`
+        ).join('');
+
+        // 初期値（日付は今日）
+        const now = new Date();
+        const dStr = formatDate(now);
+        document.getElementById('newAptDate').value = dStr;
+
+        // 空き枠更新
+        await updateAvailableTimes();
+
+        createModal.classList.add('active');
+    } catch (error) {
+        console.error('メニュー読み込みエラー:', error);
+        alert('メニューの読み込みに失敗しました');
     }
 }
