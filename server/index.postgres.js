@@ -530,6 +530,101 @@ app.get('/api/admin/appointments', requireAdmin, async (req, res) => {
     }
 });
 
+// 予約削除 (管理者用)
+app.delete('/api/admin/appointments/:id', requireAdmin, async (req, res) => {
+    try {
+        const id = req.params.id;
+
+        // 削除対象の存在確認
+        const apt = await db.queryOne('SELECT * FROM appointments WHERE id = $1', [id]);
+        if (!apt) {
+            return res.status(404).json({ error: '予約が見つかりません' });
+        }
+
+        await db.execute('DELETE FROM appointments WHERE id = $1', [id]);
+
+        await logAudit(req.session.adminId, 'delete_appointment', 'appointment', id, apt, null, req);
+
+        res.json({ success: true, message: '予約を削除しました' });
+
+    } catch (error) {
+        console.error('予約削除エラー:', error);
+        res.status(500).json({ error: '予約の削除に失敗しました' });
+    }
+});
+
+// 新規予約作成 (管理者・電話予約用)
+app.post('/api/admin/appointments', requireAdmin, async (req, res) => {
+    try {
+        const { name, startAt, serviceId, notes } = req.body;
+
+        if (!name || !startAt) {
+            return res.status(400).json({ error: '名前と日時は必須です' });
+        }
+
+        const client = await db.pool.connect();
+        try {
+            await client.query('BEGIN');
+
+            // 1. 患者登録（電話番号・カナは空でOK）
+            const patientRes = await client.query(`
+                INSERT INTO patients (name, kana, phone, created_at, updated_at)
+                VALUES ($1, $2, $3, NOW(), NOW())
+                RETURNING id
+            `, [name, '', '']);
+
+            const patientId = patientRes.rows[0].id;
+
+            // 2. 予約作成
+            const serviceIdToUse = serviceId || 1;
+            const serviceRes = await client.query('SELECT duration_minutes FROM services WHERE id = $1', [serviceIdToUse]);
+            const duration = serviceRes.rows[0] ? serviceRes.rows[0].duration_minutes : 30;
+
+            const startDate = new Date(startAt);
+            const endDate = new Date(startDate.getTime() + duration * 60000);
+
+            // トークン生成
+            const crypto = require('crypto');
+            const accessToken = crypto.randomBytes(32).toString('hex');
+            const tokenExpiresAt = new Date(startDate.getTime() + 24 * 60 * 60 * 1000);
+
+            const aptRes = await client.query(`
+                INSERT INTO appointments (
+                    patient_id, service_id, start_at, end_at, status, 
+                    access_token_hash, token_expires_at, notes, created_at, updated_at
+                )
+                VALUES ($1, $2, $3, $4, 'confirmed', $5, $6, $7, NOW(), NOW())
+                RETURNING id
+            `, [
+                patientId, serviceIdToUse, startDate, endDate,
+                accessToken, tokenExpiresAt, notes || ''
+            ]);
+
+            const newAptId = aptRes.rows[0].id;
+
+            await client.query('COMMIT');
+
+            // ログ記録
+            await logAudit(
+                req.session.adminId, 'create_appointment_phone', 'appointment',
+                newAptId, null, { name, startAt }, req
+            );
+
+            res.json({ success: true, message: '予約を作成しました' });
+
+        } catch (e) {
+            await client.query('ROLLBACK');
+            throw e;
+        } finally {
+            client.release();
+        }
+
+    } catch (error) {
+        console.error('管理者予約作成エラー:', error);
+        res.status(500).json({ error: '予約の作成に失敗しました: ' + error.message });
+    }
+});
+
 // 予約詳細
 app.get('/api/admin/appointments/:id', requireAdmin, async (req, res) => {
     try {

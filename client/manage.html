@@ -350,6 +350,7 @@
                                 </button>
                             </div>
                             <span class="week-nav-title" id="weekTitle"></span>
+                            <button class="btn btn-primary" id="newAppointmentBtn">＋ 新規予約</button>
                         </div>
                         <div class="calendar-week" id="calendarGrid">
                             <!-- カレンダーがここに描画される -->
@@ -371,7 +372,11 @@
                                 </select>
                                 <button class="btn btn-secondary" id="applyFilter">絞り込み</button>
                             </div>
-                            <button class="btn btn-primary" id="exportCsv">CSVエクスポート</button>
+                            <div>
+                                <button class="btn btn-secondary" id="openCreateModalBtn" style="margin-right: 8px;">＋
+                                    新規予約</button>
+                                <button class="btn btn-outline" id="exportCsv">CSVエクスポート</button>
+                            </div>
                         </div>
                         <div class="card">
                             <div class="table-container">
@@ -856,12 +861,57 @@
                 <div class="modal-body" id="modalBody">
                     <!-- 予約詳細がここに描画される -->
                 </div>
-                <div class="modal-footer">
-                    <button class="btn btn-secondary" id="modalCancel">閉じる</button>
-                    <button class="btn btn-primary" id="modalSave" style="display: none;">保存</button>
+                <div class="modal-footer" style="justify-content: space-between;">
+                    <button class="btn" id="modalDelete"
+                        style="background-color: #ef4444; color: white; display: none;">削除</button>
+                    <div>
+                        <button class="btn btn-secondary" id="modalCancel">閉じる</button>
+                        <button class="btn btn-primary" id="modalSave" style="display: none;">保存</button>
+                    </div>
                 </div>
             </div>
+        </div>
 
+        <!-- 予約作成モーダル -->
+        <div class="modal-overlay" id="createAppointmentModal">
+            <div class="modal">
+                <div class="modal-header">
+                    <h3 class="modal-title">新規予約登録（電話受付など）</h3>
+                    <button class="modal-close" id="closeCreateModal">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <path d="M18 6L6 18M6 6l12 12" />
+                        </svg>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <form id="createAppointmentForm">
+                        <div class="form-group">
+                            <label class="form-label">患者名 <span class="required">*</span></label>
+                            <input type="text" class="form-input" id="newAptName" required placeholder="例: 山田 一郎">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">予約日時 <span class="required">*</span></label>
+                            <input type="datetime-local" class="form-input" id="newAptDate" required>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">メニュー <span class="required">*</span></label>
+                            <select class="form-input" id="newAptService">
+                                <!-- JSでロード -->
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">メモ</label>
+                            <textarea class="form-input" id="newAptNotes" rows="2"
+                                placeholder="電話での聞き取り内容など"></textarea>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" id="createModalCancel">キャンセル</button>
+                    <button class="btn btn-primary" id="createModalSave">登録</button>
+                </div>
+            </div>
         </div>
 
         <!-- 確認モーダル -->

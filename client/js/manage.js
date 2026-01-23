@@ -444,6 +444,13 @@ async function showAppointmentDetail(id) {
         document.getElementById('modalSave').style.display = 'inline-flex';
         document.getElementById('modalSave').onclick = () => updateAppointment(id);
 
+        // 削除ボタンを表示・設定
+        const deleteBtn = document.getElementById('modalDelete');
+        if (deleteBtn) {
+            deleteBtn.style.display = 'inline-flex';
+            deleteBtn.onclick = () => deleteAppointment(id);
+        }
+
         document.getElementById('appointmentModal').classList.add('active');
 
     } catch (error) {
@@ -1462,3 +1469,108 @@ async function deleteScheduleException(id) {
 
 window.deleteScheduleException = deleteScheduleException;
 
+
+// ===== 予約削除・新規作成 =====
+
+async function deleteAppointment(id) {
+    const confirmed = await showConfirm(
+        '予約の削除',
+        'この予約を完全に削除しますか？\n（この操作は取り消せません）',
+        '削除する',
+        'btn-danger' // 赤ボタンにするためのクラス（CSS要確認、なければbtn-secondary等で代用）
+    );
+
+    if (!confirmed) return;
+
+    try {
+        await api(`/api/admin/appointments/${id}`, { method: 'DELETE' });
+        closeModal();
+        loadCalendar();
+        loadAppointments();
+    } catch (error) {
+        alert(error.message);
+    }
+}
+
+// 新規予約モーダル
+const createModal = document.getElementById('createAppointmentModal');
+const createForm = document.getElementById('createAppointmentForm');
+
+// ボタンイベント
+document.getElementById('newAppointmentBtn')?.addEventListener('click', openCreateModal);
+document.getElementById('openCreateModalBtn')?.addEventListener('click', openCreateModal);
+
+document.getElementById('closeCreateModal')?.addEventListener('click', closeCreateModal);
+document.getElementById('createModalCancel')?.addEventListener('click', closeCreateModal);
+
+document.getElementById('createModalSave')?.addEventListener('click', async () => {
+    if (createForm.checkValidity()) {
+        await createAppointment();
+    } else {
+        createForm.reportValidity();
+    }
+});
+
+async function openCreateModal() {
+    // メニュー読み込み
+    try {
+        const services = await api('/api/services'); // 公開APIを利用
+        const select = document.getElementById('newAptService');
+        select.innerHTML = services.map(s =>
+            `<option value="${s.id}">${escapeHtml(s.name)} (${s.duration_minutes}分)</option>`
+        ).join('');
+
+        // 日時の初期値下げ
+        // 現在時刻の次の00分または30分にする
+        const now = new Date();
+        now.setMinutes(now.getMinutes() + 30);
+        now.setMinutes(now.getMinutes() >= 30 ? 30 : 0, 0, 0);
+        // JSTへ変換してISO文字列の分まで
+        const tzOffset = now.getTimezoneOffset() * 60000;
+        const localISOTime = (new Date(now - tzOffset)).toISOString().slice(0, 16);
+        document.getElementById('newAptDate').value = localISOTime;
+
+        createModal.classList.add('active');
+    } catch (error) {
+        console.error('メニュー読み込みエラー:', error);
+        alert('メニューの読み込みに失敗しました');
+    }
+}
+
+function closeCreateModal() {
+    createModal.classList.remove('active');
+    createForm.reset();
+}
+
+async function createAppointment() {
+    const name = document.getElementById('newAptName').value;
+    const startAt = document.getElementById('newAptDate').value; // 'YYYY-MM-DDTHH:mm'
+    const serviceId = document.getElementById('newAptService').value;
+    const notes = document.getElementById('newAptNotes').value;
+
+    // Loading表示の代わりにボタン無効化
+    const btn = document.getElementById('createModalSave');
+    const originalText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '登録中...';
+
+    try {
+        await api('/api/admin/appointments', {
+            method: 'POST',
+            body: JSON.stringify({ name, startAt, serviceId, notes })
+        });
+
+        closeCreateModal();
+        loadCalendar();
+        loadAppointments(); // 一覧タブにいる場合のため
+
+        // 成功メッセージ（簡易）
+        alert('予約を登録しました');
+
+    } catch (error) {
+        alert(error.message);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = originalText;
+    }
+}
