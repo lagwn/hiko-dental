@@ -4,6 +4,10 @@
  */
 
 const { Pool, neonConfig } = require('@neondatabase/serverless');
+const ws = require('ws');
+
+// WebSocket設定（サーバーレス環境での接続安定化）
+neonConfig.webSocketConstructor = ws;
 
 // Vercel Edge Runtime対応
 if (process.env.VERCEL) {
