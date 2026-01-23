@@ -330,25 +330,37 @@ ${process.env.BASE_URL || 'http://localhost:3000'}/manage.html
 ※このメールは自動送信されています。
 `.trim();
 
-    try {
-        await transporter.sendMail({
-            from: `"${clinicName} 予約システム" <${settings.smtp_user || process.env.SMTP_USER}>`,
-            to: toAddress, // 配列を渡す
-            replyTo: settings.smtp_user || process.env.SMTP_USER,
-            subject: subject,
-            text: body
-        });
+    // 各宛先に個別に送信（エラーの巻き添え防止）
+    const results = [];
 
-        logEmail(db, appointment.id, adminEmail, subject, body, 'sent');
-        console.log(`📧 管理者通知メールを送信しました: ${adminEmail}`);
+    for (const recipient of toAddress) {
+        try {
+            await transporter.sendMail({
+                from: `"${clinicName} 予約システム" <${settings.smtp_user || process.env.SMTP_USER}>`,
+                to: recipient,
+                replyTo: settings.smtp_user || process.env.SMTP_USER,
+                subject: subject,
+                text: body
+            });
 
-        return { success: true };
+            logEmail(db, appointment.id, recipient, subject, body, 'sent');
+            console.log(`📧 管理者通知メールを送信しました: ${recipient}`);
+            results.push({ email: recipient, success: true });
 
-    } catch (error) {
-        console.error('📧 管理者通知メール送信エラー:', error.message);
-        logEmail(db, appointment.id, adminEmail, subject, body, 'failed', error.message);
-        return { success: false, error: error.message };
+        } catch (error) {
+            console.error(`📧 管理者通知メール送信エラー (${recipient}):`, error.message);
+            logEmail(db, appointment.id, recipient, subject, body, 'failed', error.message);
+            results.push({ email: recipient, success: false, error: error.message });
+        }
     }
+
+    // 全て失敗した場合のみエラー扱いとする（1つでも成功すれば成功とみなす）
+    const allFailed = results.length > 0 && results.every(r => !r.success);
+    if (results.length > 0 && allFailed) {
+        return { success: false, error: results[0].error };
+    }
+
+    return { success: true };
 }
 
 module.exports = {
