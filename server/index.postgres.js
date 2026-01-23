@@ -1405,59 +1405,7 @@ app.get('/api/admin/schedule-exceptions/affected-appointments', requireAdmin, as
     }
 });
 
-// デバッグ用: メール送信テスト
-app.get('/api/test-email', async (req, res) => {
-    try {
-        const settings = await getSettings();
-        const transporter = mailer.createTransporter(settings);
 
-        if (!transporter) {
-            return res.status(500).json({
-                error: 'SMTP設定が不足しています',
-                env: {
-                    user: process.env.SMTP_USER ? 'Set' : 'Not Set',
-                    pass: process.env.SMTP_PASS ? 'Set' : 'Not Set',
-                    host: process.env.SMTP_HOST || 'default',
-                    port: process.env.SMTP_PORT || 'default'
-                },
-                dbSettings: {
-                    user: settings.smtp_user ? 'Set' : 'Not Set',
-                    pass: settings.smtp_pass ? 'Set' : 'Not Set'
-                }
-            });
-        }
-
-        const testEmail = settings.smtp_user || process.env.SMTP_USER;
-
-        // テスト送信
-        const info = await transporter.sendMail({
-            from: `"Test" <${testEmail}>`,
-            to: testEmail, // 自分自身に送る
-            subject: '彦歯科医院予約システム - メールテスト',
-            text: 'このメールが届けば、SMTP設定は正常です。\n\nSent from Vercel.'
-        });
-
-        res.json({
-            success: true,
-            message: 'メール送信に成功しました',
-            info: {
-                messageId: info.messageId,
-                response: info.response,
-                envelope: info.envelope
-            }
-        });
-
-    } catch (error) {
-        console.error('メールテストエラー:', error);
-        res.status(500).json({
-            success: false,
-            error: error.message,
-            stack: error.stack,
-            code: error.code,
-            command: error.command
-        });
-    }
-});
 
 // ===== Vercel Serverless Export =====
 // Vercelの場合はサーバーを起動せず、appをエクスポート
