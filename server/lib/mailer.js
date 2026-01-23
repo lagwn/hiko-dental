@@ -14,7 +14,8 @@ function createTransporter(settings = {}) {
     const smtpUser = settings.smtp_user || process.env.SMTP_USER;
     const smtpPass = settings.smtp_pass || process.env.SMTP_PASS;
     const smtpHost = settings.smtp_host || process.env.SMTP_HOST || 'smtp.gmail.com';
-    const smtpPort = parseInt(settings.smtp_port || process.env.SMTP_PORT || '587');
+    // 文字列として来ても数値に変換して扱う
+    const smtpPort = parseInt(settings.smtp_port || process.env.SMTP_PORT || '587', 10);
 
     // ポート465はSSL、587はSTARTTLS
     const isSecure = smtpPort === 465;
