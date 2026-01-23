@@ -26,6 +26,9 @@ const SESSION_SECRET = process.env.SESSION_SECRET || 'dev-secret-change-in-produ
 // Express アプリ作成
 const app = express();
 
+// Vercelなどのプロキシ環境下でsecure Cookieを有効にするために必要
+app.set('trust proxy', 1);
+
 // リクエストログ
 app.use((req, res, next) => {
     console.log(`[REQUEST] ${req.method} ${req.url}`);
