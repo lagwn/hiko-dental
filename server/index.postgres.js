@@ -583,6 +583,10 @@ app.post('/api/admin/appointments', requireAdmin, async (req, res) => {
             const startDate = new Date(startAt);
             const endDate = new Date(startDate.getTime() + duration * 60000);
 
+            // 明示的にUTC文字列に変換してDBに渡す（勝手なタイムゾーン変換を防ぐ）
+            const startParam = startDate.toISOString();
+            const endParam = endDate.toISOString();
+
             // トークン生成
             const crypto = require('crypto');
             const accessToken = crypto.randomBytes(32).toString('hex');
@@ -596,7 +600,7 @@ app.post('/api/admin/appointments', requireAdmin, async (req, res) => {
                 VALUES ($1, $2, $3, $4, 'confirmed', $5, $6, $7, NOW(), NOW())
                 RETURNING id
             `, [
-                patientId, serviceIdToUse, startDate, endDate,
+                patientId, serviceIdToUse, startParam, endParam,
                 accessToken, tokenExpiresAt, notes || ''
             ]);
 
