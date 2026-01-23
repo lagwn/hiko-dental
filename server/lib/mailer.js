@@ -129,6 +129,7 @@ ${clinicPhone ? `電話: ${clinicPhone}` : ''}
         await transporter.sendMail({
             from: `"${clinicName}" <${settings.smtp_user || process.env.SMTP_USER}>`,
             to: patient.email,
+            replyTo: settings.smtp_user || process.env.SMTP_USER,
             subject: subject,
             text: body
         });
@@ -204,6 +205,7 @@ ${clinicPhone ? `電話: ${clinicPhone}` : ''}
         await transporter.sendMail({
             from: `"${clinicName}" <${settings.smtp_user || process.env.SMTP_USER}>`,
             to: patient.email,
+            replyTo: settings.smtp_user || process.env.SMTP_USER,
             subject: subject,
             text: body
         });
@@ -332,6 +334,7 @@ ${process.env.BASE_URL || 'http://localhost:3000'}/manage.html
         await transporter.sendMail({
             from: `"${clinicName} 予約システム" <${settings.smtp_user || process.env.SMTP_USER}>`,
             to: toAddress, // 配列を渡す
+            replyTo: settings.smtp_user || process.env.SMTP_USER,
             subject: subject,
             text: body
         });
