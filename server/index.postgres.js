@@ -562,7 +562,7 @@ app.post('/api/admin/appointments', requireAdmin, async (req, res) => {
             return res.status(400).json({ error: '名前と日時は必須です' });
         }
 
-        const client = await db.pool.connect();
+        const client = await db.getPool().connect();
         try {
             await client.query('BEGIN');
 
