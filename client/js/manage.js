@@ -1570,7 +1570,7 @@ async function createAppointment() {
     const serviceId = document.getElementById('newAptService').value;
     const notes = document.getElementById('newAptNotes').value;
 
-    const startAt = `${dateStr}T${timeStr}:00`; // ISO8601形式ではなく、Dateコンストラクタで解釈可能な形式
+    const startAt = `${dateStr}T${timeStr}:00+09:00`; // JST(日本時間)を明示して送信
 
     // Loading表示の代わりにボタン無効化
     const btn = document.getElementById('createModalSave');
