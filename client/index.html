@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ご予約 | 彦歯科医院</title>
+    <meta name="description" content="彦歯科医院のオンライン予約ページです。初診・再診・クリーニングなどのご予約をお取りいただけます。">
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+    <div class="page">
+        <!-- ヘッダー -->
+        <header class="header">
+            <div class="header-content">
+                <a href="/" class="logo">彦<span class="logo-accent">歯科医院</span></a>
+            </div>
+        </header>
+
+        <!-- プログレスバー -->
+        <div class="progress-container" id="progressContainer">
+            <div class="progress-bar">
+                <div class="progress-steps">
+                    <div class="progress-step active" data-step="1">
+                        <div class="step-number">1</div>
+                        <div class="step-label">メニュー</div>
+                    </div>
+                    <div class="progress-step" data-step="2">
+                        <div class="step-number">2</div>
+                        <div class="step-label">担当</div>
+                    </div>
+                    <div class="progress-step" data-step="3">
+                        <div class="step-number">3</div>
+                        <div class="step-label">日時</div>
+                    </div>
+                    <div class="progress-step" data-step="4">
+                        <div class="step-number">4</div>
+                        <div class="step-label">情報入力</div>
+                    </div>
+                    <div class="progress-step" data-step="5">
+                        <div class="step-number">5</div>
+                        <div class="step-label">確認</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- メインコンテンツ -->
+        <main class="main">
+            <div class="main-content">
+                <!-- エラー表示 -->
+                <div id="globalError" class="alert alert-error" style="display: none;"></div>
+
+                <!-- ステップ1: メニュー選択 -->
+                <div class="step-content active" id="step1">
+                    <div class="card">
+                        <div class="card-header">
+                            <h2 class="card-title">メニューを選択してください</h2>
+                            <p class="card-description">ご希望の診療内容をお選びください</p>
+                        </div>
+                        <div class="card-body">
+                            <div class="option-list" id="serviceList">
+                                <div class="loading"><div class="spinner"></div></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="step-nav">
+                        <button class="btn btn-primary btn-block" id="nextStep1" disabled>次へ</button>
+                    </div>
+                </div>
+
+                <!-- ステップ2: 担当選択 -->
+                <div class="step-content" id="step2">
+                    <div class="card">
+                        <div class="card-header">
+                            <h2 class="card-title">担当者を選択してください</h2>
+                            <p class="card-description">ご指名がなければ「指名なし」をお選びください</p>
+                        </div>
+                        <div class="card-body">
+                            <div class="option-list" id="staffList">
+                                <div class="loading"><div class="spinner"></div></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="step-nav">
+                        <button class="btn btn-secondary" id="prevStep2">戻る</button>
+                        <button class="btn btn-primary" id="nextStep2" disabled>次へ</button>
+                    </div>
+                </div>
+
+                <!-- ステップ3: 日時選択 -->
+                <div class="step-content" id="step3">
+                    <div class="card">
+                        <div class="card-header">
+                            <h2 class="card-title">日時を選択してください</h2>
+                            <p class="card-description">ご希望の日付と時間をお選びください</p>
+                        </div>
+                        <div class="card-body">
+                            <!-- 日付選択 -->
+                            <div id="dateSection">
+                                <div class="month-header">
+                                    <button class="month-nav" id="prevMonth">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <path d="M15 18l-6-6 6-6"/>
+                                        </svg>
+                                    </button>
+                                    <span class="month-title" id="monthTitle"></span>
+                                    <button class="month-nav" id="nextMonth">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <path d="M9 18l6-6-6-6"/>
+                                        </svg>
+                                    </button>
+                                </div>
+                                <div class="date-grid" id="dateGrid">
+                                    <div class="date-header">日</div>
+                                    <div class="date-header">月</div>
+                                    <div class="date-header">火</div>
+                                    <div class="date-header">水</div>
+                                    <div class="date-header">木</div>
+                                    <div class="date-header">金</div>
+                                    <div class="date-header">土</div>
+                                </div>
+                            </div>
+
+                            <!-- 時間選択 -->
+                            <div id="timeSection" style="display: none; margin-top: 24px;">
+                                <h3 style="font-size: 1rem; font-weight: 500; margin-bottom: 16px;" id="selectedDateLabel"></h3>
+                                <div class="slot-grid" id="slotGrid">
+                                    <div class="loading"><div class="spinner"></div></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="step-nav">
+                        <button class="btn btn-secondary" id="prevStep3">戻る</button>
+                        <button class="btn btn-primary" id="nextStep3" disabled>次へ</button>
+                    </div>
+                </div>
+
+                <!-- ステップ4: 情報入力 -->
+                <div class="step-content" id="step4">
+                    <div class="card">
+                        <div class="card-header">
+                            <h2 class="card-title">お客様情報を入力してください</h2>
+                            <p class="card-description"><span style="color: var(--error);">*</span>は必須項目です</p>
+                        </div>
+                        <div class="card-body">
+                            <form id="customerForm">
+                                <div class="form-group">
+                                    <label class="form-label" for="name">氏名<span class="required">*</span></label>
+                                    <input type="text" class="form-input" id="name" name="name" placeholder="山田 太郎" required>
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label" for="kana">ふりがな<span class="required">*</span></label>
+                                    <input type="text" class="form-input" id="kana" name="kana" placeholder="やまだ たろう" required>
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label" for="phone">電話番号<span class="required">*</span></label>
+                                    <input type="tel" class="form-input" id="phone" name="phone" placeholder="090-1234-5678" required>
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label" for="email">メールアドレス</label>
+                                    <input type="email" class="form-input" id="email" name="email" placeholder="example@email.com">
+                                    <p class="form-hint">予約確認メールをお送りします</p>
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label" for="address">住所</label>
+                                    <input type="text" class="form-input" id="address" name="address" placeholder="東京都○○区△△1-2-3">
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                    <div class="step-nav">
+                        <button class="btn btn-secondary" id="prevStep4">戻る</button>
+                        <button class="btn btn-primary" id="nextStep4">確認画面へ</button>
+                    </div>
+                </div>
+
+                <!-- ステップ5: 確認 -->
+                <div class="step-content" id="step5">
+                    <div class="card">
+                        <div class="card-header">
+                            <h2 class="card-title">ご予約内容の確認</h2>
+                            <p class="card-description">以下の内容でよろしければ「予約を確定する」ボタンを押してください</p>
+                        </div>
+                        <div class="card-body">
+                            <div class="confirm-section">
+                                <div class="confirm-title">メニュー</div>
+                                <div class="confirm-value" id="confirmService"></div>
+                            </div>
+                            <div class="confirm-section">
+                                <div class="confirm-title">担当</div>
+                                <div class="confirm-value" id="confirmStaff"></div>
+                            </div>
+                            <div class="confirm-section">
+                                <div class="confirm-title">日時</div>
+                                <div class="confirm-value" id="confirmDateTime"></div>
+                            </div>
+                            <div class="confirm-section">
+                                <div class="confirm-title">お名前</div>
+                                <div class="confirm-value" id="confirmName"></div>
+                            </div>
+                            <div class="confirm-section">
+                                <div class="confirm-title">電話番号</div>
+                                <div class="confirm-value" id="confirmPhone"></div>
+                            </div>
+                            <div class="confirm-section" id="confirmEmailSection" style="display: none;">
+                                <div class="confirm-title">メールアドレス</div>
+                                <div class="confirm-value" id="confirmEmail"></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="step-nav">
+                        <button class="btn btn-secondary" id="prevStep5">修正する</button>
+                        <button class="btn btn-primary btn-lg" id="submitBooking">予約を確定する</button>
+                    </div>
+                </div>
+
+                <!-- 完了画面 -->
+                <div class="step-content" id="stepComplete">
+                    <div class="card">
+                        <div class="card-body" style="text-align: center; padding: 48px 24px;">
+                            <div class="complete-icon">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <polyline points="20 6 9 17 4 12"></polyline>
+                                </svg>
+                            </div>
+                            <h2 class="complete-title">ご予約が完了しました</h2>
+                            <p class="complete-message">ご予約ありがとうございます。<br>確認メールをお送りしましたのでご確認ください。</p>
+                            <div class="complete-details">
+                                <div class="complete-details-row">
+                                    <span class="complete-details-label">予約番号</span>
+                                    <span class="complete-details-value" id="completeId"></span>
+                                </div>
+                                <div class="complete-details-row">
+                                    <span class="complete-details-label">日時</span>
+                                    <span class="complete-details-value" id="completeDateTime"></span>
+                                </div>
+                                <div class="complete-details-row">
+                                    <span class="complete-details-label">メニュー</span>
+                                    <span class="complete-details-value" id="completeService"></span>
+                                </div>
+                                <div class="complete-details-row">
+                                    <span class="complete-details-label">担当</span>
+                                    <span class="complete-details-value" id="completeStaff"></span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="step-nav">
+                        <a href="/" class="btn btn-secondary btn-block">トップページへ戻る</a>
+                    </div>
+                </div>
+
+                <!-- 予約確認・キャンセル画面 -->
+                <div class="step-content" id="stepCancel">
+                    <div class="card">
+                        <div class="card-header">
+                            <h2 class="card-title">ご予約の確認</h2>
+                        </div>
+                        <div class="card-body">
+                            <div id="appointmentDetails">
+                                <div class="loading"><div class="spinner"></div></div>
+                            </div>
+                            <div id="cancelForm" style="display: none; margin-top: 24px;">
+                                <div class="cancel-info">
+                                    <p>キャンセルすると元に戻せません。よろしいですか？</p>
+                                </div>
+                                <button class="btn btn-secondary btn-block" id="cancelAppointment">予約をキャンセルする</button>
+                            </div>
+                            <div id="cancelledMessage" style="display: none; margin-top: 24px;">
+                                <div class="alert alert-success">予約がキャンセルされました</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- フッター -->
+        <footer class="footer">
+            <div class="footer-content">
+                <p class="footer-text">© 2026 彦歯科医院 All Rights Reserved.</p>
+            </div>
+        </footer>
+    </div>
+
+    <script src="/js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,30 @@
+{
+    "version": 2,
+    "builds": [
+        {
+            "src": "server/index.postgres.js",
+            "use": "@vercel/node"
+        },
+        {
+            "src": "client/**",
+            "use": "@vercel/static"
+        }
+    ],
+    "routes": [
+        {
+            "src": "/api/(.*)",
+            "dest": "server/index.postgres.js"
+        },
+        {
+            "src": "/(.*\\.(html|css|js|png|jpg|jpeg|gif|svg|ico|woff|woff2|ttf|eot))",
+            "dest": "client/$1"
+        },
+        {
+            "src": "/(.*)",
+            "dest": "client/$1"
+        }
+    ],
+    "env": {
+        "NODE_ENV": "production"
+    }
+}

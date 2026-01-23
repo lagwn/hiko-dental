@@ -1,0 +1,28 @@
+# 依存関係
+node_modules/
+
+# 環境変数
+.env
+
+# データベース
+*.db
+*.db-journal
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# ログ
+*.log
+npm-debug.log*
+
+# Exclude heavy assets
+manual_assets/
+docs/*.png
+docs/*.webp

@@ -1,0 +1,37 @@
+{
+  "name": "dental-reservation-system",
+  "version": "1.0.0",
+  "description": "歯科医院予約システム",
+  "main": "server/index.postgres.js",
+  "scripts": {
+    "start": "node server/index.postgres.js",
+    "start:sqlite": "node server/index.js",
+    "dev": "nodemon server/index.postgres.js",
+    "dev:sqlite": "nodemon server/index.js",
+    "init-db": "node server/db/init.js",
+    "seed": "node server/db/seed.js",
+    "seed:postgres": "node server/db/seed.postgres.js",
+    "vercel-build": "echo 'Build complete'"
+  },
+  "dependencies": {
+    "@neondatabase/serverless": "^0.9.0",
+    "bcrypt": "^5.1.1",
+    "better-sqlite3": "^9.4.3",
+    "cookie-session": "^2.1.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.1",
+    "express": "^4.18.2",
+    "express-rate-limit": "^7.1.5",
+    "express-session": "^1.17.3",
+    "helmet": "^7.1.0",
+    "nodemailer": "^6.9.8"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "nodemon": "^3.1.11"
+  }
+}
