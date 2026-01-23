@@ -277,6 +277,9 @@ async function sendAdminNotificationEmail(db, appointment, patient, service, sta
         return { success: true, skipped: true };
     }
 
+    // カンマ区切りを配列に変換して整形
+    const toAddress = adminEmail.split(',').map(e => e.trim()).filter(e => e);
+
     const transporter = createTransporter(settings);
     if (!transporter) {
         return { success: true, skipped: true };
@@ -323,7 +326,7 @@ ${process.env.BASE_URL || 'http://localhost:3000'}/manage.html
     try {
         await transporter.sendMail({
             from: `"${clinicName} 予約システム" <${settings.smtp_user || process.env.SMTP_USER}>`,
-            to: adminEmail,
+            to: toAddress, // 配列を渡す
             subject: subject,
             text: body
         });
