@@ -219,12 +219,17 @@ ${clinicPhone ? `電話: ${clinicPhone}` : ''}
 /**
  * メール送信ログを保存
  */
-function logEmail(db, appointmentId, recipientEmail, subject, body, status, errorMessage = null) {
+async function logEmail(db, appointmentId, recipientEmail, subject, body, status, errorMessage = null) {
     try {
-        db.prepare(`
-            INSERT INTO email_logs (appointment_id, recipient_email, subject, body, status, error_message, sent_at)
-            VALUES (?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
-        `).run(appointmentId, recipientEmail, subject, body, status, errorMessage);
+        // PostgreSQL対応 (dbオブジェクトは server/db/db.js のモジュールそのもの)
+        if (db && db.insert) {
+            await db.insert(`
+                INSERT INTO email_logs (appointment_id, recipient_email, subject, body, status, error_message, sent_at)
+                VALUES ($1, $2, $3, $4, $5, $6, NOW())
+            `, [appointmentId, recipientEmail, subject, body, status, errorMessage]);
+        } else {
+            console.warn('⚠️ DBモジュールが正しく渡されていないため、メールログを保存できませんでした');
+        }
     } catch (error) {
         console.error('メールログ保存エラー:', error.message);
     }
