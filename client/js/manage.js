@@ -1514,21 +1514,42 @@ document.getElementById('createModalSave')?.addEventListener('click', async () =
 async function openCreateModal() {
     // メニュー読み込み
     try {
-        const services = await api('/api/services'); // 公開APIを利用
+        const services = await api('/api/services');
         const select = document.getElementById('newAptService');
+        // APIによっては duration または duration_minutes で返ってくるため両対応
         select.innerHTML = services.map(s =>
-            `<option value="${s.id}">${escapeHtml(s.name)} (${s.duration_minutes}分)</option>`
+            `<option value="${s.id}">${escapeHtml(s.name)} (${s.duration || s.duration_minutes}分)</option>`
         ).join('');
 
-        // 日時の初期値下げ
-        // 現在時刻の次の00分または30分にする
+        // 時間プルダウン生成 (09:00〜19:00, 30分刻み)
+        const timeSelect = document.getElementById('newAptTime');
+        timeSelect.innerHTML = '';
+        const startHour = 9;
+        const endHour = 19;
+        for (let h = startHour; h < endHour; h++) {
+            const hStr = String(h).padStart(2, '0');
+            timeSelect.innerHTML += `<option value="${hStr}:00">${hStr}:00</option>`;
+            timeSelect.innerHTML += `<option value="${hStr}:30">${hStr}:30</option>`;
+        }
+
+        // 初期値（日付は今日、時間は次の30分枠）
         const now = new Date();
-        now.setMinutes(now.getMinutes() + 30);
-        now.setMinutes(now.getMinutes() >= 30 ? 30 : 0, 0, 0);
-        // JSTへ変換してISO文字列の分まで
-        const tzOffset = now.getTimezoneOffset() * 60000;
-        const localISOTime = (new Date(now - tzOffset)).toISOString().slice(0, 16);
-        document.getElementById('newAptDate').value = localISOTime;
+        const dStr = formatDate(now); // YYYY-MM-DD
+        document.getElementById('newAptDate').value = dStr;
+
+        // 次の枠を選択
+        let nextMinutes = Math.ceil((now.getHours() * 60 + now.getMinutes()) / 30) * 30;
+        let setHours = Math.floor(nextMinutes / 60);
+        let setMinutes = nextMinutes % 60;
+
+        // 営業時間を超えていれば最後の枠or翌日だが、とりあえず単純にセット
+        const timeStr = `${String(setHours).padStart(2, '0')}:${String(setMinutes).padStart(2, '0')}`;
+        // 選択肢にあるか確認してセット
+        if (timeSelect.querySelector(`option[value="${timeStr}"]`)) {
+            timeSelect.value = timeStr;
+        } else {
+            timeSelect.selectedIndex = 0;
+        }
 
         createModal.classList.add('active');
     } catch (error) {
@@ -1544,9 +1565,12 @@ function closeCreateModal() {
 
 async function createAppointment() {
     const name = document.getElementById('newAptName').value;
-    const startAt = document.getElementById('newAptDate').value; // 'YYYY-MM-DDTHH:mm'
+    const dateStr = document.getElementById('newAptDate').value;
+    const timeStr = document.getElementById('newAptTime').value;
     const serviceId = document.getElementById('newAptService').value;
     const notes = document.getElementById('newAptNotes').value;
+
+    const startAt = `${dateStr}T${timeStr}:00`; // ISO8601形式ではなく、Dateコンストラクタで解釈可能な形式
 
     // Loading表示の代わりにボタン無効化
     const btn = document.getElementById('createModalSave');
@@ -1562,9 +1586,8 @@ async function createAppointment() {
 
         closeCreateModal();
         loadCalendar();
-        loadAppointments(); // 一覧タブにいる場合のため
+        loadAppointments();
 
-        // 成功メッセージ（簡易）
         alert('予約を登録しました');
 
     } catch (error) {
