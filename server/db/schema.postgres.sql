@@ -1,6 +1,36 @@
 -- 歯科医院予約システム データベーススキーマ
 -- PostgreSQL 用
 
+-- 管理者
+CREATE TABLE IF NOT EXISTS admins (
+    id SERIAL PRIMARY KEY,
+    username VARCHAR(100) NOT NULL UNIQUE,
+    password_hash VARCHAR(255) NOT NULL,
+    display_name VARCHAR(255) NOT NULL,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    last_login_at TIMESTAMP,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+-- 監査ログ
+CREATE TABLE IF NOT EXISTS audit_logs (
+    id SERIAL PRIMARY KEY,
+    admin_id INTEGER,
+    action VARCHAR(100) NOT NULL,
+    entity_type VARCHAR(100),
+    entity_id INTEGER,
+    old_value JSONB,
+    new_value JSONB,
+    ip_address VARCHAR(45),
+    user_agent TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    FOREIGN KEY (admin_id) REFERENCES admins(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_audit_logs_admin ON audit_logs(admin_id);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs(created_at);
+
 -- 診療メニュー
 CREATE TABLE IF NOT EXISTS services (
     id SERIAL PRIMARY KEY,
@@ -94,35 +124,7 @@ CREATE TABLE IF NOT EXISTS email_logs (
 
 CREATE INDEX IF NOT EXISTS idx_email_logs_appointment ON email_logs(appointment_id);
 
--- 管理者
-CREATE TABLE IF NOT EXISTS admins (
-    id SERIAL PRIMARY KEY,
-    username VARCHAR(100) NOT NULL UNIQUE,
-    password_hash VARCHAR(255) NOT NULL,
-    display_name VARCHAR(255) NOT NULL,
-    is_active BOOLEAN NOT NULL DEFAULT TRUE,
-    last_login_at TIMESTAMP,
-    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
-);
 
--- 監査ログ
-CREATE TABLE IF NOT EXISTS audit_logs (
-    id SERIAL PRIMARY KEY,
-    admin_id INTEGER,
-    action VARCHAR(100) NOT NULL,
-    entity_type VARCHAR(100),
-    entity_id INTEGER,
-    old_value JSONB,
-    new_value JSONB,
-    ip_address VARCHAR(45),
-    user_agent TEXT,
-    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    FOREIGN KEY (admin_id) REFERENCES admins(id) ON DELETE SET NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_audit_logs_admin ON audit_logs(admin_id);
-CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs(created_at);
 
 -- システム設定
 CREATE TABLE IF NOT EXISTS settings (
