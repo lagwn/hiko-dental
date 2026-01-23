@@ -277,8 +277,13 @@ async function sendAdminNotificationEmail(db, appointment, patient, service, sta
         return { success: true, skipped: true };
     }
 
-    // カンマ区切りを配列に変換して整形
-    const toAddress = adminEmail.split(',').map(e => e.trim()).filter(e => e);
+    // カンマ区切りを配列に変換して整形（adminEmailがある場合のみ）
+    const toAddress = adminEmail ? adminEmail.split(',').map(e => e.trim()).filter(e => e) : [];
+
+    if (toAddress.length === 0) {
+        console.log('📧 有効な管理者通知メールアドレスがないためスキップします');
+        return { success: true, skipped: true };
+    }
 
     const transporter = createTransporter(settings);
     if (!transporter) {
