@@ -969,6 +969,238 @@ app.post('/api/admin/settings/smtp/test', requireAdmin, async (req, res) => {
     }
 });
 
+// ===== 予約枠キャパシティ管理API =====
+
+// キャパシティ設定一覧取得
+app.get('/api/admin/slot-capacities', requireAdmin, async (req, res) => {
+    try {
+        const capacities = await db.queryAll(`
+            SELECT * FROM slot_capacities ORDER BY day_of_week, time_slot
+        `);
+
+        // デフォルト値も取得
+        const defaultCapacity = await db.queryOne(`
+            SELECT value FROM settings WHERE key = 'default_slot_capacity'
+        `);
+
+        res.json({
+            capacities,
+            defaultCapacity: parseInt(defaultCapacity?.value) || 1
+        });
+    } catch (error) {
+        console.error('キャパシティ設定取得エラー:', error);
+        res.status(500).json({ error: 'キャパシティ設定の取得に失敗しました' });
+    }
+});
+
+// デフォルトキャパシティ更新
+app.put('/api/admin/slot-capacities/default', requireAdmin, async (req, res) => {
+    try {
+        const { capacity } = req.body;
+
+        if (!capacity || capacity < 1) {
+            return res.status(400).json({ error: 'キャパシティは1以上の数値を指定してください' });
+        }
+
+        await db.execute(`
+            INSERT INTO settings (key, value, description)
+            VALUES ('default_slot_capacity', $1, '時間枠あたりのデフォルト予約上限数')
+            ON CONFLICT (key) DO UPDATE SET value = $1
+        `, [String(capacity)]);
+
+        await logAudit(req.session.adminId, 'update_default_capacity', 'settings', null, null, { capacity }, req);
+
+        res.json({ success: true, message: 'デフォルトキャパシティを更新しました' });
+
+    } catch (error) {
+        console.error('デフォルトキャパシティ更新エラー:', error);
+        res.status(500).json({ error: 'デフォルトキャパシティの更新に失敗しました' });
+    }
+});
+
+// 一括キャパシティ設定（曜日×時間帯マトリクス）
+app.put('/api/admin/slot-capacities/bulk', requireAdmin, async (req, res) => {
+    try {
+        const { capacities } = req.body; // [{ dayOfWeek, timeSlot, capacity }, ...]
+
+        if (!Array.isArray(capacities)) {
+            return res.status(400).json({ error: '無効なデータ形式です' });
+        }
+
+        // トランザクションで一括処理
+        await db.transaction(async (client) => {
+            for (const item of capacities) {
+                if (item.capacity === null || item.capacity === undefined) {
+                    // 削除（デフォルトに戻す）
+                    await client.query(`
+                        DELETE FROM slot_capacities 
+                        WHERE day_of_week = $1 AND time_slot = $2
+                    `, [item.dayOfWeek, item.timeSlot]);
+                } else {
+                    // 追加/更新
+                    await client.query(`
+                        INSERT INTO slot_capacities (day_of_week, time_slot, capacity, updated_at)
+                        VALUES ($1, $2, $3, NOW())
+                        ON CONFLICT (day_of_week, time_slot) 
+                        DO UPDATE SET capacity = $3, updated_at = NOW()
+                    `, [item.dayOfWeek, item.timeSlot, item.capacity]);
+                }
+            }
+        });
+
+        await logAudit(req.session.adminId, 'bulk_update_capacity', 'slot_capacities', null, null, { count: capacities.length }, req);
+
+        res.json({ success: true, message: 'キャパシティ設定を一括更新しました' });
+
+    } catch (error) {
+        console.error('一括キャパシティ更新エラー:', error);
+        res.status(500).json({ error: 'キャパシティ設定の一括更新に失敗しました' });
+    }
+});
+
+// 個別キャパシティ設定
+app.put('/api/admin/slot-capacities/:dayOfWeek/:timeSlot', requireAdmin, async (req, res) => {
+    try {
+        const { dayOfWeek, timeSlot } = req.params;
+        const { capacity } = req.body;
+
+        if (capacity === null || capacity === undefined) {
+            // 削除（デフォルトに戻す）
+            await db.execute(`
+                DELETE FROM slot_capacities 
+                WHERE day_of_week = $1 AND time_slot = $2
+            `, [dayOfWeek, timeSlot]);
+        } else {
+            if (capacity < 1) {
+                return res.status(400).json({ error: 'キャパシティは1以上を指定してください' });
+            }
+            await db.execute(`
+                INSERT INTO slot_capacities (day_of_week, time_slot, capacity, updated_at)
+                VALUES ($1, $2, $3, NOW())
+                ON CONFLICT (day_of_week, time_slot) 
+                DO UPDATE SET capacity = $3, updated_at = NOW()
+            `, [dayOfWeek, timeSlot, capacity]);
+        }
+
+        await logAudit(req.session.adminId, 'update_slot_capacity', 'slot_capacities', null, null, { dayOfWeek, timeSlot, capacity }, req);
+
+        res.json({ success: true, message: 'キャパシティを更新しました' });
+
+    } catch (error) {
+        console.error('個別キャパシティ更新エラー:', error);
+        res.status(500).json({ error: 'キャパシティの更新に失敗しました' });
+    }
+});
+
+// 特定日付のキャパシティ設定取得
+app.get('/api/admin/slot-capacities/date/:date', requireAdmin, async (req, res) => {
+    try {
+        const { date } = req.params;
+        const targetDate = new Date(date);
+        const dayOfWeek = targetDate.getDay(); // 0-6
+
+        // 1. デフォルト値
+        const defaultCapacityRes = await db.queryOne(`SELECT value FROM settings WHERE key = 'default_slot_capacity'`);
+        const defaultCapacity = parseInt(defaultCapacityRes?.value) || 1;
+
+        // 2. 曜日設定
+        const dayCapacities = await db.queryAll(`
+            SELECT time_slot, capacity FROM slot_capacities 
+            WHERE day_of_week = $1 AND specific_date IS NULL
+        `, [dayOfWeek]);
+
+        // 3. 特定日設定
+        const dateCapacities = await db.queryAll(`
+            SELECT time_slot, capacity FROM slot_capacities 
+            WHERE specific_date = $1
+        `, [date]);
+
+        // マージロジック
+        // 全時間枠（9:00-19:00, 30分刻み）を生成して、優先順位に従って埋める
+        const result = [];
+        const startHour = 9;
+        const endHour = 19;
+
+        for (let h = startHour; h < endHour; h++) {
+            for (let m of [0, 30]) {
+                const timeSlot = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00`;
+                const displayTime = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+
+                let capacity = defaultCapacity;
+                let source = 'default';
+
+                const dayConfig = dayCapacities.find(c => c.time_slot === timeSlot);
+                if (dayConfig) {
+                    capacity = dayConfig.capacity;
+                    source = 'day';
+                }
+
+                const dateConfig = dateCapacities.find(c => c.time_slot === timeSlot);
+                if (dateConfig) {
+                    capacity = dateConfig.capacity;
+                    source = 'date';
+                }
+
+                result.push({
+                    timeSlot: displayTime,
+                    capacity,
+                    source // default, day, date
+                });
+            }
+        }
+
+        res.json({ date, dayOfWeek, capacities: result });
+
+    } catch (error) {
+        console.error('特定日キャパシティ取得エラー:', error);
+        res.status(500).json({ error: 'キャパシティ設定の取得に失敗しました' });
+    }
+});
+
+// 特定日付のキャパシティ設定保存
+app.put('/api/admin/slot-capacities/date/:date', requireAdmin, async (req, res) => {
+    try {
+        const { date } = req.params;
+        const { capacities } = req.body; // [{ timeSlot: '09:00', capacity: 3 }, ...]
+
+        if (!Array.isArray(capacities)) {
+            return res.status(400).json({ error: '無効なデータ形式です' });
+        }
+
+        await db.transaction(async (client) => {
+            for (const item of capacities) {
+                // capacityがnull/undefined、または "default" "day" などの指示があれば削除
+                // ここでは単純に「送られてきた値」を特定日設定として保存する
+                // もし「設定解除（曜日設定に戻す）」場合は null を送る想定
+
+                if (item.capacity === null) {
+                    // 特定日設定削除
+                    await client.query(`
+                        DELETE FROM slot_capacities 
+                        WHERE specific_date = $1 AND time_slot = $2
+                    `, [date, item.timeSlot]);
+                } else {
+                    // 特定日設定追加/更新
+                    await client.query(`
+                        INSERT INTO slot_capacities (specific_date, time_slot, capacity, updated_at)
+                        VALUES ($1, $2, $3, NOW())
+                        ON CONFLICT (specific_date, time_slot) 
+                        DO UPDATE SET capacity = $3, updated_at = NOW()
+                    `, [date, item.timeSlot, item.capacity]);
+                }
+            }
+        });
+
+        await logAudit(req.session.adminId, 'update_date_capacity', 'slot_capacities', null, null, { date, count: capacities.length }, req);
+
+        res.json({ success: true, message: `${date} のキャパシティ設定を保存しました` });
+
+    } catch (error) {
+        console.error('特定日キャパシティ保存エラー:', error);
+        res.status(500).json({ error: 'キャパシティ設定の保存に失敗しました' });
+    }
+});
+
 // ===== 医師（スタッフ）管理API =====
 
 // スタッフ一覧（管理者用）

@@ -604,6 +604,88 @@
                                 </p>
                             </div>
 
+                            <!-- 予約枠キャパシティ設定 -->
+                            <div class="card" style="margin-bottom: var(--spacing-lg);">
+                                <div class="card-body">
+                                    <h3 style="margin-bottom: var(--spacing-lg);">予約枠キャパシティ設定</h3>
+                                    <p
+                                        style="color: var(--muted); font-size: 0.875rem; margin-bottom: var(--spacing-lg);">
+                                        各時間帯に同時に受け付けられる予約の上限数を設定します。
+                                    </p>
+
+                                    <div id="capacityAlert" class="alert" style="display: none;"></div>
+
+                                    <!-- デフォルトキャパシティ -->
+                                    <div
+                                        style="display: flex; align-items: center; gap: var(--spacing-md); margin-bottom: var(--spacing-lg); padding: var(--spacing-md); background: var(--surface); border-radius: var(--radius);">
+                                        <label class="form-label"
+                                            style="margin-bottom: 0; white-space: nowrap;">デフォルト上限人数</label>
+                                        <input type="number" class="form-input" id="defaultCapacity" min="1" max="10"
+                                            style="width: 80px;" value="1">
+                                        <span>人</span>
+                                        <button type="button" class="btn btn-primary"
+                                            id="saveDefaultCapacity">保存</button>
+                                        <button type="button" class="btn btn-secondary"
+                                            id="applyDefaultToAll">全枠に適用</button>
+                                    </div>
+
+                                    <!-- 曜日別・時間帯別マトリクス -->
+                                    <div style="overflow-x: auto;">
+                                        <table class="table" id="capacityMatrix" style="font-size: 0.85rem;">
+                                            <thead>
+                                                <tr>
+                                                    <th style="width: 70px;">時間</th>
+                                                    <th>月</th>
+                                                    <th>火</th>
+                                                    <th>水</th>
+                                                    <th>木</th>
+                                                    <th>金</th>
+                                                    <th>土</th>
+                                                    <th>日</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody id="capacityMatrixBody">
+                                                <!-- JSで生成 -->
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                    <div style="margin-top: var(--spacing-md);">
+                                        <button type="button" class="btn btn-primary"
+                                            id="saveCapacityMatrix">変更を保存</button>
+                                    </div>
+
+                                    <hr
+                                        style="margin: var(--spacing-lg) 0; border: 0; border-top: 1px solid var(--border);">
+
+                                    <h4 style="margin-bottom: var(--spacing-md);">特定日の個別設定</h4>
+                                    <div
+                                        style="display: flex; align-items: center; gap: var(--spacing-md); margin-bottom: var(--spacing-md);">
+                                        <label class="form-label" style="margin-bottom: 0;">日付を選択:</label>
+                                        <input type="date" class="form-input" id="capacityDateInput"
+                                            style="width: auto;">
+                                    </div>
+
+                                    <div id="dateCapacityContainer" style="display: none;">
+                                        <div
+                                            style="background: var(--surface); padding: var(--spacing-md); border-radius: var(--radius); margin-bottom: var(--spacing-md);">
+                                            <p style="margin-bottom: var(--spacing-md); font-size: 0.9rem;">
+                                                指定した日のキャパシティを個別に設定します。<br>
+                                                <span
+                                                    style="display: inline-block; width: 10px; height: 10px; background: #e0f2fe; border: 1px solid #0284c7; margin-right: 4px;"></span>は特定日設定、
+                                                <span
+                                                    style="display: inline-block; width: 10px; height: 10px; background: #f3f4f6; border: 1px solid #d1d5db; margin-right: 4px;"></span>は曜日設定、白はデフォルト値です。
+                                            </p>
+                                            <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px;"
+                                                id="dateCapacityGrid">
+                                                <!-- JSで生成 -->
+                                            </div>
+                                        </div>
+                                        <button type="button" class="btn btn-primary"
+                                            id="saveDateCapacity">この日の設定を保存</button>
+                                    </div>
+                                </div>
+                            </div>
+
                             <!-- 予約締切設定 -->
                             <div class="card" style="margin-bottom: var(--spacing-lg);">
                                 <div class="card-body">

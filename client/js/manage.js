@@ -1665,3 +1665,273 @@ async function openCreateModalNew() {
         alert('メニューの読み込みに失敗しました');
     }
 }
+
+// ===== キャパシティ設定管理 =====
+
+let capacitySettings = {
+    defaultCapacity: 1,
+    capacities: []
+};
+
+async function loadCapacitySettings() {
+    try {
+        const result = await api('/api/admin/slot-capacities');
+        capacitySettings.defaultCapacity = result.defaultCapacity;
+        capacitySettings.capacities = result.capacities;
+
+        document.getElementById('defaultCapacity').value = result.defaultCapacity;
+        renderCapacityMatrix();
+    } catch (error) {
+        console.error('キャパシティ設定読み込みエラー:', error);
+    }
+}
+
+function renderCapacityMatrix() {
+    const tbody = document.getElementById('capacityMatrixBody');
+    if (!tbody) return;
+
+    // 時間帯 (9:00 〜 18:30)
+    const timeSlots = [];
+    for (let h = 9; h < 19; h++) {
+        timeSlots.push(`${String(h).padStart(2, '0')}:00`);
+        timeSlots.push(`${String(h).padStart(2, '0')}:30`);
+    }
+
+    // 曜日順序: 月火水木金土日 = 1,2,3,4,5,6,0
+    const dayOrder = [1, 2, 3, 4, 5, 6, 0];
+
+    let html = '';
+    timeSlots.forEach(time => {
+        html += `<tr>`;
+        html += `<td style="font-weight: 600;">${time}</td>`;
+
+        dayOrder.forEach(dayOfWeek => {
+            // 個別設定があればその値、なければデフォルト
+            const customSetting = capacitySettings.capacities.find(
+                c => c.day_of_week === dayOfWeek && c.time_slot === time + ':00'
+            );
+            const capacity = customSetting ? customSetting.capacity : capacitySettings.defaultCapacity;
+            const isCustom = !!customSetting;
+
+            html += `<td>
+                <input type="number" 
+                    class="form-input capacity-input" 
+                    data-day="${dayOfWeek}" 
+                    data-time="${time}"
+                    value="${capacity}" 
+                    min="1" 
+                    max="10"
+                    style="width: 50px; padding: 4px; text-align: center; ${isCustom ? 'background: #e0f2fe; border-color: #0284c7;' : ''}"
+                >
+            </td>`;
+        });
+
+        html += `</tr>`;
+    });
+
+    tbody.innerHTML = html;
+}
+
+// デフォルトキャパシティ保存
+document.getElementById('saveDefaultCapacity')?.addEventListener('click', async () => {
+    const capacity = parseInt(document.getElementById('defaultCapacity').value);
+
+    if (!capacity || capacity < 1) {
+        showCapacityAlert('error', '1以上の数値を入力してください');
+        return;
+    }
+
+    try {
+        await api('/api/admin/slot-capacities/default', {
+            method: 'PUT',
+            body: JSON.stringify({ capacity })
+        });
+
+        capacitySettings.defaultCapacity = capacity;
+        showCapacityAlert('success', 'デフォルト上限人数を保存しました');
+        renderCapacityMatrix();
+    } catch (error) {
+        showCapacityAlert('error', error.message);
+    }
+});
+
+// 全枠にデフォルト値を適用
+document.getElementById('applyDefaultToAll')?.addEventListener('click', async () => {
+    const capacity = parseInt(document.getElementById('defaultCapacity').value);
+
+    if (!capacity || capacity < 1) {
+        showCapacityAlert('error', '1以上の数値を入力してください');
+        return;
+    }
+
+    // 全ての個別設定を削除（デフォルト値に戻す）
+    try {
+        // まず現在の全設定を削除するために、全セルを null で送信
+        const capacities = [];
+        capacitySettings.capacities.forEach(c => {
+            capacities.push({
+                dayOfWeek: c.day_of_week,
+                timeSlot: c.time_slot,
+                capacity: null // 削除
+            });
+        });
+
+        if (capacities.length > 0) {
+            await api('/api/admin/slot-capacities/bulk', {
+                method: 'PUT',
+                body: JSON.stringify({ capacities })
+            });
+        }
+
+        // デフォルト値も更新
+        await api('/api/admin/slot-capacities/default', {
+            method: 'PUT',
+            body: JSON.stringify({ capacity })
+        });
+
+        capacitySettings.capacities = [];
+        capacitySettings.defaultCapacity = capacity;
+        renderCapacityMatrix();
+        showCapacityAlert('success', `全ての枠を ${capacity} 人に設定しました`);
+    } catch (error) {
+        showCapacityAlert('error', error.message);
+    }
+});
+
+// マトリクス変更を保存
+document.getElementById('saveCapacityMatrix')?.addEventListener('click', async () => {
+    const inputs = document.querySelectorAll('.capacity-input');
+    const capacities = [];
+
+    inputs.forEach(input => {
+        const dayOfWeek = parseInt(input.dataset.day);
+        const timeSlot = input.dataset.time + ':00'; // "09:00" -> "09:00:00"
+        const capacity = parseInt(input.value);
+
+        if (capacity !== capacitySettings.defaultCapacity) {
+            // デフォルトと異なる場合のみ個別設定として保存
+            capacities.push({ dayOfWeek, timeSlot, capacity });
+        } else {
+            // デフォルトと同じなら個別設定を削除
+            capacities.push({ dayOfWeek, timeSlot, capacity: null });
+        }
+    });
+
+    try {
+        await api('/api/admin/slot-capacities/bulk', {
+            method: 'PUT',
+            body: JSON.stringify({ capacities })
+        });
+
+        showCapacityAlert('success', 'キャパシティ設定を保存しました');
+        await loadCapacitySettings(); // 再読み込み
+    } catch (error) {
+        showCapacityAlert('error', error.message);
+    }
+});
+
+// 特定日の設定管理
+document.getElementById('capacityDateInput')?.addEventListener('change', async (e) => {
+    const date = e.target.value;
+    if (!date) {
+        document.getElementById('dateCapacityContainer').style.display = 'none';
+        return;
+    }
+
+    document.getElementById('dateCapacityContainer').style.display = 'block';
+    await loadDateCapacity(date);
+});
+
+async function loadDateCapacity(date) {
+    try {
+        const result = await api(`/api/admin/slot-capacities/date/${date}`);
+        renderDateCapacityGrid(result.capacities);
+    } catch (error) {
+        console.error('特定日設定読み込みエラー:', error);
+        showCapacityAlert('error', '設定の読み込みに失敗しました');
+    }
+}
+
+function renderDateCapacityGrid(capacities) {
+    const container = document.getElementById('dateCapacityGrid');
+    container.innerHTML = '';
+
+    capacities.forEach(item => {
+        const isDateSpecific = item.source === 'date';
+        const isDaySpecific = item.source === 'day';
+
+        let bgColor = '#ffffff';
+        let borderColor = '#d1d5db';
+
+        if (isDateSpecific) {
+            bgColor = '#e0f2fe';
+            borderColor = '#0284c7';
+        } else if (isDaySpecific) {
+            bgColor = '#f3f4f6';
+        }
+
+        container.innerHTML += `
+            <div style="display: flex; flex-direction: column; gap: 4px;">
+                <label style="font-size: 0.8rem; color: var(--muted);">${item.timeSlot}</label>
+                <input type="number" 
+                    class="form-input date-capacity-input" 
+                    data-time="${item.timeSlot}"
+                    value="${item.capacity}" 
+                    min="1" 
+                    max="10"
+                    style="padding: 4px; text-align: center; background: ${bgColor}; border-color: ${borderColor};"
+                >
+            </div>
+        `;
+    });
+}
+
+document.getElementById('saveDateCapacity')?.addEventListener('click', async () => {
+    const date = document.getElementById('capacityDateInput').value;
+    if (!date) return;
+
+    const inputs = document.querySelectorAll('.date-capacity-input');
+    const capacities = [];
+
+    inputs.forEach(input => {
+        capacities.push({
+            timeSlot: input.dataset.time + ':00',
+            capacity: parseInt(input.value)
+        });
+    });
+
+    try {
+        await api(`/api/admin/slot-capacities/date/${date}`, {
+            method: 'PUT',
+            body: JSON.stringify({ capacities })
+        });
+
+        showCapacityAlert('success', `${date} の設定を保存しました`);
+        await loadDateCapacity(date); // 再描画して色を更新
+    } catch (error) {
+        showCapacityAlert('error', error.message);
+    }
+});
+
+function showCapacityAlert(type, message) {
+    const alert = document.getElementById('capacityAlert');
+    if (!alert) return;
+    alert.className = `alert alert-${type}`;
+    alert.textContent = message;
+    alert.style.display = 'block';
+    setTimeout(() => { alert.style.display = 'none'; }, 4000);
+}
+
+// 設定タブ表示時にキャパシティ設定を読み込む
+const origLoadSettings = typeof loadSettings === 'function' ? loadSettings : null;
+if (origLoadSettings) {
+    window.loadSettings = async function () {
+        await origLoadSettings();
+        await loadCapacitySettings();
+    };
+} else {
+    // loadSettings が定義されていなければ新たに定義
+    async function loadSettings() {
+        await loadCapacitySettings();
+    }
+}

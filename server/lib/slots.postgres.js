@@ -124,27 +124,36 @@ async function getAvailableSlots(dateStr, serviceId, staffId, settings) {
             // 予約済みチェック
             const slotStartStr = formatDateTime(currentTime);
             const slotEndStr = formatDateTime(slotEnd);
+            const timeSlotStr = formatTime(currentTime); // "09:00" 形式
 
-            const isBooked = existingAppointments.some(apt => {
+            // この時間帯と重複する予約数をカウント
+            const bookingCount = existingAppointments.filter(apt => {
                 // スタッフ指名がある場合は、同じスタッフの予約のみチェック
                 if (staffId && apt.staff_id && apt.staff_id !== staffId) {
                     return false;
                 }
                 // 時間重複チェック
-                const aptStart = new Date(apt.start_at).toISOString();
-                const aptEnd = new Date(apt.end_at).toISOString();
-                return (slotStartStr < aptEnd && slotEndStr > aptStart);
-            });
+                const aptStart = new Date(apt.start_at);
+                const aptEnd = new Date(apt.end_at);
+                return (currentTime < aptEnd && slotEnd > aptStart);
+            }).length;
+
+            // この時間枠のキャパシティを取得（個別設定 > デフォルト）
+            const capacity = await getSlotCapacity(dayOfWeek, timeSlotStr, settings, dateStr);
+            const isAvailable = bookingCount < capacity;
 
             // 現在時刻より後のスロットのみ追加
             const slotDateTime = new Date(currentTime);
-            if (!isBooked && slotDateTime > now) {
+            if (slotDateTime > now) {
                 slots.push({
+                    time: formatTime(currentTime),
                     start: formatTime(currentTime),
                     end: formatTime(slotEnd),
                     startAt: slotStartStr,
                     endAt: slotEndStr,
-                    available: true
+                    available: isAvailable,
+                    bookingCount: bookingCount,
+                    capacity: capacity
                 });
             }
         }
@@ -328,6 +337,37 @@ async function validateBooking(startAt, endAt, serviceId, staffId, settings) {
     return { valid: true, error: null };
 }
 
+/**
+ * 指定時間枠のキャパシティを取得
+ * 優先順位: 特定日設定 > 曜日設定 > デフォルト値
+ */
+async function getSlotCapacity(dayOfWeek, timeSlot, settings, dateStr = null) {
+    // 1. 特定日の設定を確認（dateStrがある場合）
+    if (dateStr) {
+        const specificCapacity = await db.queryOne(`
+            SELECT capacity FROM slot_capacities 
+            WHERE specific_date = $1 AND time_slot = $2
+        `, [dateStr, timeSlot]);
+
+        if (specificCapacity) {
+            return specificCapacity.capacity;
+        }
+    }
+
+    // 2. 曜日設定を確認
+    const dayCapacity = await db.queryOne(`
+        SELECT capacity FROM slot_capacities 
+        WHERE day_of_week = $1 AND time_slot = $2 AND specific_date IS NULL
+    `, [dayOfWeek, timeSlot]);
+
+    if (dayCapacity) {
+        return dayCapacity.capacity;
+    }
+
+    // 3. デフォルト値を返す
+    return parseInt(settings.default_slot_capacity) || 1;
+}
+
 // ヘルパー関数
 function formatDate(date) {
     const year = date.getFullYear();
@@ -355,6 +395,7 @@ module.exports = {
     getAvailableSlots,
     getAvailableDates,
     validateBooking,
+    getSlotCapacity,
     formatDate,
     formatTime,
     formatDateTime
