@@ -409,16 +409,25 @@ async function getSlotCapacity(dayOfWeek, timeSlot, settings, dateStr = null, re
 
 // ヘルパー関数
 function formatDate(date) {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
+    // JSTでフォーマット: YYYY-MM-DD
+    const formatter = new Intl.DateTimeFormat('ja-JP', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        timeZone: 'Asia/Tokyo'
+    });
+    // "2026/01/24" -> "2026-01-24"
+    return formatter.format(date).replace(/\//g, '-');
 }
 
 function formatTime(date) {
-    const hours = String(date.getHours()).padStart(2, '0');
-    const minutes = String(date.getMinutes()).padStart(2, '0');
-    return `${hours}:${minutes}`;
+    // JSTでフォーマット: HH:mm
+    return new Intl.DateTimeFormat('ja-JP', {
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+        timeZone: 'Asia/Tokyo'
+    }).format(date);
 }
 
 function formatDateTime(date) {
