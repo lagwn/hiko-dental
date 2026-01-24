@@ -1201,6 +1201,22 @@ app.put('/api/admin/slot-capacities/date/:date', requireAdmin, async (req, res) 
     }
 });
 
+// ===== サービス（メニュー）管理API =====
+
+// サービス一覧（管理者用）
+app.get('/api/admin/services', requireAdmin, async (req, res) => {
+    try {
+        const services = await db.queryAll(`
+            SELECT * FROM services ORDER BY sort_order, id
+        `);
+        res.json(services);
+    } catch (error) {
+        console.error('サービス取得エラー:', error);
+        res.status(500).json({ error: 'サービスの取得に失敗しました' });
+    }
+});
+
+
 // ===== 医師（スタッフ）管理API =====
 
 // スタッフ一覧（管理者用）
