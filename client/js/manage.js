@@ -309,17 +309,19 @@ function renderCalendar(startOfWeek, appointments) {
 
             // この時間帯の予約を取得
             const hourAppointments = appointments.filter(apt => {
-                const aptDate = apt.start_at.split(' ')[0];
-                const aptHour = parseInt(apt.start_at.split(' ')[1].split(':')[0]);
+                const d = new Date(apt.start_at);
+                const aptDate = formatDate(d);
+                const aptHour = d.getHours();
                 return aptDate === dateStr && aptHour === hour;
             });
 
             html += `<div class="time-slot" data-date="${dateStr}" data-hour="${hour}">`;
             hourAppointments.forEach(apt => {
-                const startTime = apt.start_at.split(' ')[1].slice(0, 5);
+                const d = new Date(apt.start_at);
+                const startTime = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
                 html += `
                     <div class="appointment-block ${apt.status}" data-id="${apt.id}">
-                        ${startTime} ${escapeHtml(apt.patient_name)}
+                        ${startTime} ${escapeHtml(apt.patient_name || apt.name || '名称未設定')}
                     </div>
                 `;
             });
