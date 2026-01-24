@@ -113,6 +113,9 @@ async function getAvailableSlots(dateStr, serviceId, staffId, settings) {
         );
     }
 
+    // キャパシティ設定を一括取得（N+1問題解消）
+    const capacityMap = await fetchSlotCapacities(dayOfWeek, dateStr);
+
     const slots = [];
     while (currentTime < closeTime) {
         const slotEnd = new Date(currentTime.getTime() + serviceDuration * 60000);
@@ -144,8 +147,11 @@ async function getAvailableSlots(dateStr, serviceId, staffId, settings) {
                 return (currentTime < aptEnd && slotEnd > aptStart);
             }).length;
 
-            // この時間枠のキャパシティを取得（個別設定 > デフォルト）
-            const capacity = await getSlotCapacity(dayOfWeek, timeSlotStr, settings, dateStr);
+            // この時間枠のキャパシティを取得（Mapから参照）
+            let capacity = capacityMap.get(timeSlotStr);
+            if (capacity === undefined) {
+                capacity = parseInt(settings.default_slot_capacity) || 1;
+            }
             const isAvailable = bookingCount < capacity;
 
             // 現在時刻より後のスロットのみ追加
@@ -446,5 +452,72 @@ module.exports = {
     getSlotCapacity,
     formatDate,
     formatTime,
+    formatTime,
     formatDateTime
 };
+
+
+/**
+ * その日のキャパシティ設定を一括取得
+ */
+async function fetchSlotCapacities(dayOfWeek, dateStr, retry = true) {
+    try {
+        const rows = await db.queryAll(`
+            SELECT * FROM slot_capacities
+            WHERE specific_date = $1
+               OR (day_of_week = $2 AND specific_date IS NULL)
+        `, [dateStr, dayOfWeek]);
+
+        const capacityMap = new Map();
+
+        // 1. まず曜日設定を適用
+        rows.filter(r => !r.specific_date).forEach(r => {
+            // time_slotは "09:00:00" のような形式で来る可能性があるため、hh:mmに整形
+            const time = r.time_slot.substring(0, 5);
+            capacityMap.set(time, r.capacity);
+        });
+
+        // 2. 特定日設定で上書き（優先度高）
+        rows.filter(r => r.specific_date).forEach(r => {
+            const time = r.time_slot.substring(0, 5);
+            capacityMap.set(time, r.capacity);
+        });
+
+        return capacityMap;
+
+    } catch (error) {
+        // テーブルが存在しないエラー (Postgres code 42P01) の場合、自動修復
+        if (retry && error.code === '42P01') {
+            await ensureSlotCapacitiesTable();
+            return fetchSlotCapacities(dayOfWeek, dateStr, false);
+        }
+        console.error('キャパシティ一括取得失敗:', error);
+        return new Map(); // エラー時は空マップ（デフォルト値が使われる）
+    }
+}
+
+async function ensureSlotCapacitiesTable() {
+    console.log('slot_capacitiesテーブルが存在しないため、自動作成します...');
+    try {
+        await db.execute(`
+            CREATE TABLE IF NOT EXISTS slot_capacities (
+                id SERIAL PRIMARY KEY,
+                day_of_week INTEGER,
+                specific_date DATE DEFAULT NULL,
+                time_slot TIME NOT NULL,
+                capacity INTEGER NOT NULL DEFAULT 1 CHECK (capacity >= 1),
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW(),
+                UNIQUE(day_of_week, time_slot)
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_slot_capacities_date_time ON slot_capacities(specific_date, time_slot) WHERE specific_date IS NOT NULL;
+            
+            INSERT INTO settings (key, value, description) 
+            VALUES ('default_slot_capacity', '1', '時間枠あたりのデフォルト予約上限数')
+            ON CONFLICT (key) DO NOTHING;
+        `);
+        console.log('slot_capacitiesテーブルを作成しました。');
+    } catch (error) {
+        console.error('slot_capacitiesテーブル作成失敗:', error);
+    }
+}
