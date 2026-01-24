@@ -326,24 +326,37 @@ async function validateBooking(startAt, endAt, serviceId, staffId, settings) {
     }
 
     // 重複予約チェック
-    let conflict;
     if (staffId) {
-        conflict = await db.queryOne(`
+        // スタッフ指名の際は、そのスタッフが空いているか厳密に確認（1人1枠）
+        const conflict = await db.queryOne(`
             SELECT * FROM appointments 
             WHERE status = 'confirmed'
             AND start_at < $1 AND end_at > $2
             AND (staff_id = $3 OR staff_id IS NULL)
         `, [endAt, startAt, staffId]);
+
+        if (conflict) {
+            return { valid: false, error: 'この担当者はその時間帯に予約が入っています' };
+        }
     } else {
-        conflict = await db.queryOne(`
+        // 指名なしの場合、枠全体のキャパシティを確認
+        const conflicts = await db.queryAll(`
             SELECT * FROM appointments 
             WHERE status = 'confirmed'
             AND start_at < $1 AND end_at > $2
         `, [endAt, startAt]);
-    }
 
-    if (conflict) {
-        return { valid: false, error: 'この時間帯は既に予約されています' };
+        const bookingCount = conflicts.length;
+
+        // JSTでの時刻文字列 (HH:mm) を取得
+        const timeSlotStr = formatTime(startDate);
+
+        // キャパシティ取得
+        const capacity = await getSlotCapacity(dayOfWeek, timeSlotStr, settings, dateStr);
+
+        if (bookingCount >= capacity) {
+            return { valid: false, error: 'この時間帯は満席です' };
+        }
     }
 
     return { valid: true, error: null };
