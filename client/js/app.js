@@ -201,11 +201,17 @@ async function renderSlots(date) {
             return;
         }
 
-        elements.slotGrid.innerHTML = slots.map(slot => `
-            <div class="slot-item" data-start="${slot.startAt}" data-end="${slot.endAt}">
-                ${slot.start}
+        elements.slotGrid.innerHTML = slots.map(slot => {
+            const isFull = !slot.available;
+            const className = isFull ? 'slot-item disabled' : 'slot-item';
+            const label = isFull ? `${slot.start}<br><span style="font-size:0.8em">満席</span>` : slot.start;
+
+            return `
+            <div class="${className}" data-start="${slot.startAt}" data-end="${slot.endAt}">
+                ${label}
             </div>
-        `).join('');
+            `;
+        }).join('');
     } catch (error) {
         elements.slotGrid.innerHTML = `<div class="no-slots">${escapeHtml(error.message)}</div>`;
     }
