@@ -74,40 +74,46 @@ async function getAvailableSlots(dateStr, serviceId, staffId, settings) {
     const lunchStart = settings.lunch_start || '12:00';
     const lunchEnd = settings.lunch_end || '13:00';
 
-    // スロット生成
-    const slots = [];
-    const [openHour, openMin] = businessHours.open_time.split(':').map(Number);
-    const [closeHour, closeMin] = businessHours.close_time.split(':').map(Number);
-    const [lunchStartHour, lunchStartMin] = lunchStart.split(':').map(Number);
-    const [lunchEndHour, lunchEndMin] = lunchEnd.split(':').map(Number);
+    // スロット生成（JST +09:00 を基準にする）
+    const createJstDate = (timeStr) => {
+        // timeStr: "HH:mm"
+        const [h, m] = timeStr.trim().split(':');
+        /* 
+           dateStr (YYYY-MM-DD) と timeStr (HH:mm) を結合して JSTのDateを作る。
+           ISO形式: YYYY-MM-DDTHH:mm:00+09:00
+        */
+        return new Date(`${dateStr}T${h}:${m}:00+09:00`);
+    };
 
-    let currentTime = new Date(targetDate);
-    currentTime.setHours(openHour, openMin, 0, 0);
-
-    const closeTime = new Date(targetDate);
-    closeTime.setHours(closeHour, closeMin, 0, 0);
-
-    const lunchStartTime = new Date(targetDate);
-    lunchStartTime.setHours(lunchStartHour, lunchStartMin, 0, 0);
-
-    const lunchEndTime = new Date(targetDate);
-    lunchEndTime.setHours(lunchEndHour, lunchEndMin, 0, 0);
+    let currentTime = createJstDate(businessHours.open_time);
+    const closeTime = createJstDate(businessHours.close_time);
+    const lunchStartTime = createJstDate(lunchStart);
+    const lunchEndTime = createJstDate(lunchEnd);
 
     // 既存予約取得
+    // JSTでの一日の範囲を指定して取得する（タイムゾーンによる検索漏れを防ぐため）
+    const startOfDay = new Date(`${dateStr}T00:00:00+09:00`);
+    const endOfDay = new Date(`${dateStr}T23:59:59.999+09:00`);
+
     let existingAppointments;
+    const queryBase = `
+        SELECT start_at, end_at, staff_id FROM appointments 
+        WHERE start_at >= $1 AND start_at <= $2 AND status = 'confirmed'
+    `;
+
     if (staffId) {
-        existingAppointments = await db.queryAll(`
-            SELECT start_at, end_at, staff_id FROM appointments 
-            WHERE DATE(start_at) = $1 AND status = 'confirmed'
-            AND (staff_id = $2 OR staff_id IS NULL)
-        `, [dateStr, staffId]);
+        existingAppointments = await db.queryAll(
+            queryBase + ' AND (staff_id = $3 OR staff_id IS NULL)',
+            [startOfDay, endOfDay, staffId]
+        );
     } else {
-        existingAppointments = await db.queryAll(`
-            SELECT start_at, end_at, staff_id FROM appointments 
-            WHERE DATE(start_at) = $1 AND status = 'confirmed'
-        `, [dateStr]);
+        existingAppointments = await db.queryAll(
+            queryBase,
+            [startOfDay, endOfDay]
+        );
     }
 
+    const slots = [];
     while (currentTime < closeTime) {
         const slotEnd = new Date(currentTime.getTime() + serviceDuration * 60000);
 
