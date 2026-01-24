@@ -807,6 +807,24 @@ document.getElementById('settingsForm')?.addEventListener('submit', async (e) =>
     }
 });
 
+// デバッグ: 全予約削除
+document.getElementById('debugClearAppointments')?.addEventListener('click', async () => {
+    if (!confirm('本当に全ての予約データを削除しますか？\nこの操作は取り消せません。')) {
+        return;
+    }
+
+    try {
+        const result = await api('/api/admin/debug/appointments', {
+            method: 'DELETE'
+        });
+        alert(result.message);
+        // カレンダー再読み込み
+        loadCalendar();
+    } catch (error) {
+        alert('削除エラー: ' + error.message);
+    }
+});
+
 // テストメール送信
 document.getElementById('testEmailBtn')?.addEventListener('click', async () => {
     const btn = document.getElementById('testEmailBtn');

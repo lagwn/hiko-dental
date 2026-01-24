@@ -1461,6 +1461,18 @@ app.put('/api/admin/settings/booking', requireAdmin, async (req, res) => {
     }
 });
 
+// デバッグ: 予約データ全消去
+app.delete('/api/admin/debug/appointments', requireAdmin, async (req, res) => {
+    try {
+        await db.execute('TRUNCATE TABLE appointments CASCADE');
+        await logAudit(req.session.adminId, 'debug_clear_appointments', 'system', null, null, null, req);
+        res.json({ success: true, message: '全予約データを削除しました' });
+    } catch (error) {
+        console.error('全予約削除エラー:', error);
+        res.status(500).json({ error: '削除に失敗しました: ' + error.message });
+    }
+});
+
 // ===== スケジュール例外管理API =====
 
 // スケジュール例外一覧取得
