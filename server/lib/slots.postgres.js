@@ -341,27 +341,60 @@ async function validateBooking(startAt, endAt, serviceId, staffId, settings) {
  * 指定時間枠のキャパシティを取得
  * 優先順位: 特定日設定 > 曜日設定 > デフォルト値
  */
-async function getSlotCapacity(dayOfWeek, timeSlot, settings, dateStr = null) {
-    // 1. 特定日の設定を確認（dateStrがある場合）
-    if (dateStr) {
-        const specificCapacity = await db.queryOne(`
-            SELECT capacity FROM slot_capacities 
-            WHERE specific_date = $1 AND time_slot = $2
-        `, [dateStr, timeSlot]);
+async function getSlotCapacity(dayOfWeek, timeSlot, settings, dateStr = null, retry = true) {
+    try {
+        // 1. 特定日の設定を確認（dateStrがある場合）
+        if (dateStr) {
+            const specificCapacity = await db.queryOne(`
+                SELECT capacity FROM slot_capacities 
+                WHERE specific_date = $1 AND time_slot = $2
+            `, [dateStr, timeSlot]);
 
-        if (specificCapacity) {
-            return specificCapacity.capacity;
+            if (specificCapacity) {
+                return specificCapacity.capacity;
+            }
         }
-    }
 
-    // 2. 曜日設定を確認
-    const dayCapacity = await db.queryOne(`
-        SELECT capacity FROM slot_capacities 
-        WHERE day_of_week = $1 AND time_slot = $2 AND specific_date IS NULL
-    `, [dayOfWeek, timeSlot]);
+        // 2. 曜日設定を確認
+        const dayCapacity = await db.queryOne(`
+            SELECT capacity FROM slot_capacities 
+            WHERE day_of_week = $1 AND time_slot = $2 AND specific_date IS NULL
+        `, [dayOfWeek, timeSlot]);
 
-    if (dayCapacity) {
-        return dayCapacity.capacity;
+        if (dayCapacity) {
+            return dayCapacity.capacity;
+        }
+    } catch (error) {
+        // テーブルが存在しないエラー (Postgres code 42P01: undefined_table) の場合、テーブルを作成してリトライ
+        if (retry && error.code === '42P01') {
+            console.log('slot_capacitiesテーブルが存在しないため、自動作成します...');
+            try {
+                await db.execute(`
+                    CREATE TABLE IF NOT EXISTS slot_capacities (
+                        id SERIAL PRIMARY KEY,
+                        day_of_week INTEGER,
+                        specific_date DATE DEFAULT NULL,
+                        time_slot TIME NOT NULL,
+                        capacity INTEGER NOT NULL DEFAULT 1 CHECK (capacity >= 1),
+                        created_at TIMESTAMP DEFAULT NOW(),
+                        updated_at TIMESTAMP DEFAULT NOW(),
+                        UNIQUE(day_of_week, time_slot)
+                    );
+                    CREATE UNIQUE INDEX IF NOT EXISTS idx_slot_capacities_date_time ON slot_capacities(specific_date, time_slot) WHERE specific_date IS NOT NULL;
+                    
+                    INSERT INTO settings (key, value, description) 
+                    VALUES ('default_slot_capacity', '1', '時間枠あたりのデフォルト予約上限数')
+                    ON CONFLICT (key) DO NOTHING;
+                `);
+                console.log('slot_capacitiesテーブルを作成しました。リトライします。');
+                return getSlotCapacity(dayOfWeek, timeSlot, settings, dateStr, false);
+            } catch (createError) {
+                console.error('slot_capacitiesテーブル作成失敗:', createError);
+            }
+        }
+
+        // それ以外のエラー、または作成失敗時はデフォルト値
+        console.error(`キャパシティ取得失敗 (time: ${timeSlot}):`, error.message);
     }
 
     // 3. デフォルト値を返す
