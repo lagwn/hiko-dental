@@ -738,12 +738,16 @@
                             <div class="card" style="margin-bottom: var(--spacing-lg); border-color: #fca5a5;">
                                 <div class="card-body">
                                     <h3 style="margin-bottom: var(--spacing-lg); color: #ef4444;">デバッグ設定（取扱い注意）</h3>
-                                    <div style="display: flex; gap: 16px; align-items: center;">
+                                    <div style="display: flex; gap: 16px; align-items: center; flex-wrap: wrap;">
                                         <button type="button" class="btn" style="background: #ef4444; color: white;"
                                             id="debugClearAppointments">予約データを全て削除</button>
-                                        <span
-                                            style="color: var(--muted); font-size: 0.875rem;">※実行すると全ての予約が消えます。元に戻せません。</span>
+                                        <button type="button" class="btn" style="background: #b91c1c; color: white;"
+                                            id="debugClearPatients">患者データを全て削除</button>
                                     </div>
+                                    <p style="color: var(--muted); font-size: 0.875rem; margin-top: 8px;">
+                                        ※「患者データを全て削除」を実行すると、その患者に関連する予約データも同時に削除されます。<br>
+                                        ※どちらも元に戻すことはできません。
+                                    </p>
                                 </div>
                             </div>
 

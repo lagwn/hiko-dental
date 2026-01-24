@@ -1473,6 +1473,19 @@ app.delete('/api/admin/debug/appointments', requireAdmin, async (req, res) => {
     }
 });
 
+// デバッグ: 患者データ全消去
+app.delete('/api/admin/debug/patients', requireAdmin, async (req, res) => {
+    try {
+        // カスケード削除で関連する予約なども消える可能性がある旨はUIで警告済み
+        await db.execute('TRUNCATE TABLE patients CASCADE');
+        await logAudit(req.session.adminId, 'debug_clear_patients', 'system', null, null, null, req);
+        res.json({ success: true, message: '全患者データを削除しました' });
+    } catch (error) {
+        console.error('全患者削除エラー:', error);
+        res.status(500).json({ error: '削除に失敗しました: ' + error.message });
+    }
+});
+
 // ===== スケジュール例外管理API =====
 
 // スケジュール例外一覧取得

@@ -825,6 +825,26 @@ document.getElementById('debugClearAppointments')?.addEventListener('click', asy
     }
 });
 
+
+
+// デバッグ: 全患者削除
+document.getElementById('debugClearPatients')?.addEventListener('click', async () => {
+    if (!confirm('本当に全ての患者データを削除しますか？\n\n【警告】\n患者に関連する「予約データ」も全て削除されます。\nこの操作は取り消せません。')) {
+        return;
+    }
+
+    try {
+        const result = await api('/api/admin/debug/patients', {
+            method: 'DELETE'
+        });
+        alert(result.message);
+        // カレンダーと患者リスト再読み込みの必要があるが、リロードを推奨
+        location.reload();
+    } catch (error) {
+        alert('削除エラー: ' + error.message);
+    }
+});
+
 // テストメール送信
 document.getElementById('testEmailBtn')?.addEventListener('click', async () => {
     const btn = document.getElementById('testEmailBtn');
