@@ -110,16 +110,9 @@ function renderServices() {
     elements.serviceList.innerHTML = state.services.map(service => `
         <label class="option-item" data-id="${service.id}">
             <input type="radio" name="service" value="${service.id}">
-            <div class="option-content">
-                <div class="option-image">
-                    <img src="/images/service_default.png" alt="Icon">
-                </div>
-                <div class="option-info">
-                    <div class="option-name">${escapeHtml(service.name)}</div>
-                    ${service.description ? `<div class="option-description">${escapeHtml(service.description)}</div>` : ''}
-                    <span class="option-duration">${service.duration}分</span>
-                </div>
-            </div>
+            <div class="option-name">${escapeHtml(service.name)}</div>
+            ${service.description ? `<div class="option-description">${escapeHtml(service.description)}</div>` : ''}
+            <span class="option-duration">${service.duration}分</span>
         </label>
     `).join('');
 }
@@ -133,15 +126,8 @@ function renderStaff() {
     elements.staffList.innerHTML = staffWithNoPreference.map(member => `
         <label class="option-item" data-id="${member.id || 'none'}">
             <input type="radio" name="staff" value="${member.id || ''}">
-            <div class="option-content">
-                <div class="option-image staff-image">
-                    <img src="/images/staff_default.png" alt="Avatar">
-                </div>
-                <div class="option-info">
-                    <div class="option-name">${escapeHtml(member.name)}</div>
-                    ${member.title ? `<div class="option-description">${escapeHtml(member.title)}</div>` : ''}
-                </div>
-            </div>
+            <div class="option-name">${escapeHtml(member.name)}</div>
+            ${member.title ? `<div class="option-description">${escapeHtml(member.title)}</div>` : ''}
         </label>
     `).join('');
 }

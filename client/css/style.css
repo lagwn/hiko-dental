@@ -69,7 +69,6 @@ body {
 }
 
 /* ===== ヘッダー ===== */
-/* ===== ヘッダー ===== */
 .header {
     background: var(--bg);
     border-bottom: 1px solid var(--border);
@@ -88,64 +87,14 @@ body {
 }
 
 .logo {
-    display: flex;
-    align-items: center;
-    gap: var(--spacing-sm);
     font-size: 1.25rem;
     font-weight: 700;
     color: var(--accent);
     text-decoration: none;
 }
 
-.logo-icon {
-    width: 32px;
-    height: 32px;
-    object-fit: contain;
-}
-
 .logo-accent {
     color: var(--accent);
-}
-
-/* ===== ヒーローエリア ===== */
-.hero {
-    position: relative;
-    width: 100%;
-    height: 200px;
-    overflow: hidden;
-}
-
-.hero-bg {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-}
-
-.hero-overlay {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background: rgba(0, 0, 0, 0.4);
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    color: white;
-    text-align: center;
-}
-
-.hero-title {
-    font-size: 2rem;
-    font-weight: 700;
-    margin-bottom: var(--spacing-xs);
-    letter-spacing: 0.05em;
-}
-
-.hero-text {
-    font-size: 1rem;
-    opacity: 0.9;
 }
 
 /* ===== プログレスバー ===== */
@@ -319,57 +268,15 @@ body {
     display: none;
 }
 
-/* オプション内容（画像付きレイアウト） */
-.option-content {
-    display: flex;
-    align-items: flex-start;
-    gap: var(--spacing-md);
-}
-
-.option-image {
-    width: 60px;
-    height: 60px;
-    flex-shrink: 0;
-    background: white;
-    border-radius: var(--radius);
-    padding: 8px;
-    border: 1px solid var(--border);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.option-image img {
-    width: 100%;
-    height: 100%;
-    object-fit: contain;
-}
-
-.option-image.staff-image {
-    padding: 0;
-    overflow: hidden;
-    border-radius: 50%;
-}
-
-.option-image.staff-image img {
-    object-fit: cover;
-}
-
-.option-info {
-    flex: 1;
-}
-
 .option-name {
     font-weight: 500;
     color: var(--text);
     margin-bottom: var(--spacing-xs);
-    font-size: 1.1rem;
 }
 
 .option-description {
     font-size: 0.875rem;
     color: var(--muted);
-    line-height: 1.4;
 }
 
 .option-duration {
