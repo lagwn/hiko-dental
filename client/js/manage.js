@@ -782,13 +782,18 @@ function showBookingSettingsAlert(type, message) {
 document.getElementById('settingsForm')?.addEventListener('submit', async (e) => {
     e.preventDefault();
 
+    const smtpPass = document.getElementById('smtpPass').value;
+
     const data = {
         smtpHost: document.getElementById('smtpHost').value,
         smtpPort: document.getElementById('smtpPort').value,
         smtpUser: document.getElementById('smtpUser').value,
-        smtpPass: document.getElementById('smtpPass').value,
         adminNotificationEmail: document.getElementById('adminNotificationEmail').value
     };
+
+    if (smtpPass) {
+        data.smtpPass = smtpPass;
+    }
 
     try {
         const result = await api('/api/admin/settings/smtp', {
