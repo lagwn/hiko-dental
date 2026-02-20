@@ -55,23 +55,60 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 });
 
-// ===== API通信 =====
+// ===== API通信（タイムアウト・リトライ機構付き） =====
 async function api(endpoint, options = {}) {
-    const response = await fetch(endpoint, {
-        ...options,
-        headers: {
-            'Content-Type': 'application/json',
-            ...options.headers
+    const maxRetries = options.method === 'POST' ? 0 : 2; // POST（予約作成等）はリトライしない（二重送信防止）
+    const timeout = 30000; // 30秒タイムアウト
+    let lastError = null;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+            const response = await fetch(endpoint, {
+                ...options,
+                signal: controller.signal,
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...options.headers
+                }
+            });
+
+            clearTimeout(timeoutId);
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                // 409 Conflict（ダブルブッキング）は即座にエラー表示
+                if (response.status === 409) {
+                    throw new Error(data.error || 'この時間帯は既に予約で埋まっています。別の時間帯をお選びください。');
+                }
+                throw new Error(data.error || 'エラーが発生しました');
+            }
+
+            return data;
+        } catch (error) {
+            lastError = error;
+
+            // AbortError（タイムアウト）
+            if (error.name === 'AbortError') {
+                lastError = new Error('通信がタイムアウトしました。インターネット接続を確認してください。');
+            }
+            // ネットワークエラー
+            else if (error instanceof TypeError && error.message.includes('fetch')) {
+                lastError = new Error('ネットワーク接続に問題があります。インターネット接続を確認して再度お試しください。');
+            }
+
+            // リトライ可能な場合は待機してリトライ
+            if (attempt < maxRetries) {
+                await new Promise(resolve => setTimeout(resolve, 1000 * (attempt + 1)));
+                continue;
+            }
         }
-    });
-
-    const data = await response.json();
-
-    if (!response.ok) {
-        throw new Error(data.error || 'エラーが発生しました');
     }
 
-    return data;
+    throw lastError;
 }
 
 async function loadServices() {
@@ -405,11 +442,18 @@ function showConfirmation() {
     }
 }
 
-// ===== 予約送信 =====
+// ===== 予約送信（二重送信防止付き） =====
+let isSubmitting = false;
+
 async function submitBooking() {
+    // 二重送信防止
+    if (isSubmitting) return;
+    isSubmitting = true;
+
     const submitBtn = document.getElementById('submitBooking');
     submitBtn.disabled = true;
     submitBtn.textContent = '送信中...';
+    hideError();
 
     try {
         const data = {
@@ -433,9 +477,15 @@ async function submitBooking() {
         showComplete(result);
 
     } catch (error) {
-        showError(error.message);
+        // 409 Conflict（満席）の場合はカレンダー画面に戻す案内を追加
+        if (error.message.includes('満席') || error.message.includes('既に予約')) {
+            showError(error.message + '<br><br>戻って別の時間帯をお選びください。');
+        } else {
+            showError(error.message + '<br><br>問題が続く場合は、お電話にてご予約ください。');
+        }
         submitBtn.disabled = false;
         submitBtn.textContent = '予約を確定する';
+        isSubmitting = false;
     }
 }
 

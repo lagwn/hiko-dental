@@ -187,7 +187,7 @@ app.get('/api/slots', async (req, res) => {
     }
 });
 
-// 予約作成
+// 予約作成（トランザクション＋排他ロック付き）
 app.post('/api/appointments', bookingLimiter, async (req, res) => {
     try {
         const { serviceId, staffId, startAt, endAt, name, kana, phone, email, address } = req.body;
@@ -208,7 +208,7 @@ app.post('/api/appointments', bookingLimiter, async (req, res) => {
 
         const settings = await getSettings();
 
-        // 予約の有効性を検証
+        // 予約の有効性を検証（基本バリデーション：営業日・時間帯チェック等）
         const bookingValidation = await slots.validateBooking(
             startAt,
             endAt,
@@ -221,90 +221,149 @@ app.post('/api/appointments', bookingLimiter, async (req, res) => {
             return res.status(400).json({ error: bookingValidation.error });
         }
 
-        // 既存患者の検索（電話またはメールで一致）
-        let patient = null;
-        const cleanPhone = phone.replace(/[-\s]/g, '');
+        // === トランザクション内で患者登録・排他ロック重複チェック・予約作成を一括実行 ===
+        const client = await db.getPool().connect();
+        let result;
 
-        if (email) {
-            patient = await db.queryOne(`
-                SELECT * FROM patients WHERE phone = $1 OR email = $2
-            `, [cleanPhone, email]);
-        } else {
-            patient = await db.queryOne(`
-                SELECT * FROM patients WHERE phone = $1
-            `, [cleanPhone]);
+        try {
+            await client.query('BEGIN');
+
+            // 既存患者の検索（電話またはメールで一致）
+            let patient = null;
+            const cleanPhone = phone.replace(/[-\s]/g, '');
+
+            if (email) {
+                const patientRes = await client.query(`
+                    SELECT * FROM patients WHERE phone = $1 OR email = $2
+                `, [cleanPhone, email]);
+                patient = patientRes.rows[0] || null;
+            } else {
+                const patientRes = await client.query(`
+                    SELECT * FROM patients WHERE phone = $1
+                `, [cleanPhone]);
+                patient = patientRes.rows[0] || null;
+            }
+
+            // 患者が存在しない場合は新規作成
+            if (!patient) {
+                const patientRes = await client.query(`
+                    INSERT INTO patients (name, kana, phone, email, address)
+                    VALUES ($1, $2, $3, $4, $5)
+                    RETURNING id
+                `, [
+                    security.sanitize(name),
+                    security.sanitize(kana),
+                    cleanPhone,
+                    email ? security.sanitize(email) : null,
+                    address ? security.sanitize(address) : null
+                ]);
+                patient = { id: patientRes.rows[0].id };
+            } else {
+                // 既存患者の情報を更新
+                await client.query(`
+                    UPDATE patients SET name = $1, kana = $2, email = COALESCE($3, email), address = COALESCE($4, address), updated_at = NOW()
+                    WHERE id = $5
+                `, [
+                    security.sanitize(name),
+                    security.sanitize(kana),
+                    email ? security.sanitize(email) : null,
+                    address ? security.sanitize(address) : null,
+                    patient.id
+                ]);
+            }
+
+            // === 排他ロック付き重複チェック (Race Condition 対策) ===
+            // FOR UPDATE でロックを取得し、同時予約によるダブルブッキングを防止
+            const parsedStaffId = staffId ? parseInt(staffId) : null;
+
+            if (parsedStaffId) {
+                // スタッフ指名ありの場合
+                const conflictRes = await client.query(`
+                    SELECT id FROM appointments
+                    WHERE status = 'confirmed'
+                    AND start_at < $1 AND end_at > $2
+                    AND (staff_id = $3 OR staff_id IS NULL)
+                    FOR UPDATE
+                `, [endAt, startAt, parsedStaffId]);
+
+                if (conflictRes.rows.length > 0) {
+                    await client.query('ROLLBACK');
+                    return res.status(409).json({ error: 'この担当者はその時間帯に既に予約が入っています。別の時間帯をお選びください。' });
+                }
+            } else {
+                // 指名なしの場合：キャパシティチェック
+                const conflictRes = await client.query(`
+                    SELECT id FROM appointments
+                    WHERE status = 'confirmed'
+                    AND start_at < $1 AND end_at > $2
+                    FOR UPDATE
+                `, [endAt, startAt]);
+
+                const bookingCount = conflictRes.rows.length;
+                const capacity = parseInt(settings.default_slot_capacity) || 1;
+
+                if (bookingCount >= capacity) {
+                    await client.query('ROLLBACK');
+                    return res.status(409).json({ error: 'この時間帯は満席です。別の時間帯をお選びください。' });
+                }
+            }
+
+            // アクセストークン生成
+            const accessToken = security.generateAccessToken();
+            const tokenHash = security.hashToken(accessToken);
+            const tokenExpiry = security.calculateTokenExpiry();
+
+            // 予約作成
+            const appointmentRes = await client.query(`
+                INSERT INTO appointments (patient_id, service_id, staff_id, start_at, end_at, access_token_hash, token_expires_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                RETURNING id
+            `, [
+                patient.id,
+                parseInt(serviceId),
+                parsedStaffId,
+                startAt,
+                endAt,
+                tokenHash,
+                tokenExpiry.toISOString()
+            ]);
+
+            const appointmentId = appointmentRes.rows[0].id;
+
+            await client.query('COMMIT');
+
+            // 予約情報を取得（メール送信用、トランザクション外で実行）
+            const appointment = await db.queryOne('SELECT * FROM appointments WHERE id = $1', [appointmentId]);
+            const service = await db.queryOne('SELECT * FROM services WHERE id = $1', [serviceId]);
+            const staffData = parsedStaffId ? await db.queryOne('SELECT * FROM staff WHERE id = $1', [parsedStaffId]) : null;
+            const patientData = await db.queryOne('SELECT * FROM patients WHERE id = $1', [patient.id]);
+
+            result = { appointmentId, appointment, service, staffData, patientData, accessToken };
+        } catch (txError) {
+            await client.query('ROLLBACK');
+            throw txError;
+        } finally {
+            client.release();
         }
 
-        // 患者が存在しない場合は新規作成
-        if (!patient) {
-            const patientId = await db.insert(`
-                INSERT INTO patients (name, kana, phone, email, address)
-                VALUES ($1, $2, $3, $4, $5)
-            `, [
-                security.sanitize(name),
-                security.sanitize(kana),
-                cleanPhone,
-                email ? security.sanitize(email) : null,
-                address ? security.sanitize(address) : null
-            ]);
-            patient = { id: patientId };
-        } else {
-            // 既存患者の情報を更新
-            await db.execute(`
-                UPDATE patients SET name = $1, kana = $2, email = COALESCE($3, email), address = COALESCE($4, address), updated_at = NOW()
-                WHERE id = $5
-            `, [
-                security.sanitize(name),
-                security.sanitize(kana),
-                email ? security.sanitize(email) : null,
-                address ? security.sanitize(address) : null,
-                patient.id
-            ]);
-        }
-
-        // アクセストークン生成
-        const accessToken = security.generateAccessToken();
-        const tokenHash = security.hashToken(accessToken);
-        const tokenExpiry = security.calculateTokenExpiry();
-
-        // 予約作成
-        const appointmentId = await db.insert(`
-            INSERT INTO appointments (patient_id, service_id, staff_id, start_at, end_at, access_token_hash, token_expires_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
-        `, [
-            patient.id,
-            parseInt(serviceId),
-            staffId ? parseInt(staffId) : null,
-            startAt,
-            endAt,
-            tokenHash,
-            tokenExpiry.toISOString()
-        ]);
-
-        // 予約情報を取得（メール送信用）
-        const appointment = await db.queryOne('SELECT * FROM appointments WHERE id = $1', [appointmentId]);
-        const service = await db.queryOne('SELECT * FROM services WHERE id = $1', [serviceId]);
-        const staff = staffId ? await db.queryOne('SELECT * FROM staff WHERE id = $1', [staffId]) : null;
-        const patientData = await db.queryOne('SELECT * FROM patients WHERE id = $1', [patient.id]);
-
-        // 確認メール送信（非同期、失敗しても予約は確定）
-        mailer.sendConfirmationEmail(null, appointment, patientData, service, staff, accessToken, settings)
+        // 確認メール送信（非同期、失敗しても予約は確定）— dbモジュールを渡してログ保存
+        mailer.sendConfirmationEmail(db, result.appointment, result.patientData, result.service, result.staffData, result.accessToken, settings)
             .catch(err => console.error('メール送信エラー:', err));
 
-        // 管理者への通知メール送信（非同期）
-        mailer.sendAdminNotificationEmail(null, appointment, patientData, service, staff, settings)
+        // 管理者への通知メール送信（非同期）— dbモジュールを渡してログ保存
+        mailer.sendAdminNotificationEmail(db, result.appointment, result.patientData, result.service, result.staffData, settings)
             .catch(err => console.error('管理者通知メール送信エラー:', err));
 
         res.status(201).json({
             success: true,
-            appointmentId,
+            appointmentId: result.appointmentId,
             message: '予約が完了しました',
             appointment: {
-                id: appointmentId,
+                id: result.appointmentId,
                 startAt,
                 endAt,
-                service: service.name,
-                staff: staff ? staff.name : '指名なし'
+                service: result.service.name,
+                staff: result.staffData ? result.staffData.name : '指名なし'
             }
         });
 
@@ -1778,6 +1837,27 @@ app.get('/api/admin/schedule-exceptions/affected-appointments', requireAdmin, as
 });
 
 
+
+// ===== ヘルスチェックAPI（死活監視用） =====
+app.get('/api/health', async (req, res) => {
+    try {
+        const result = await db.queryOne('SELECT 1 AS ok, NOW() AS server_time');
+        res.json({
+            status: 'ok',
+            database: 'connected',
+            serverTime: result.server_time,
+            timestamp: new Date().toISOString()
+        });
+    } catch (error) {
+        console.error('ヘルスチェックエラー:', error.message);
+        res.status(503).json({
+            status: 'error',
+            database: 'disconnected',
+            message: 'データベース接続エラー',
+            timestamp: new Date().toISOString()
+        });
+    }
+});
 
 // ===== Vercel Serverless Export =====
 // Vercelの場合はサーバーを起動せず、appをエクスポート
