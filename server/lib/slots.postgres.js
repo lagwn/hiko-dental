@@ -304,12 +304,28 @@ async function getAvailableDates(settings) {
 
     const dates = [];
 
-    // 休診日を一括取得
-    const holidays = await db.queryAll(`SELECT date FROM holidays`);
+    // 休診日・臨時休業を一括取得
+    const [holidays, closedExceptions] = await Promise.all([
+        db.queryAll(`SELECT date FROM holidays`),
+        db.queryAll(`SELECT start_date, end_date FROM schedule_exceptions WHERE exception_type = 'closed'`)
+    ]);
+
     const holidayDates = new Set(holidays.map(h => {
         const d = new Date(h.date);
         return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     }));
+
+    // 臨時休業の日付範囲をSetに展開
+    const closedExceptionDates = new Set();
+    for (const ex of closedExceptions) {
+        const start = new Date(ex.start_date);
+        const end = new Date(ex.end_date);
+        start.setHours(0, 0, 0, 0);
+        end.setHours(0, 0, 0, 0);
+        for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+            closedExceptionDates.add(formatDate(new Date(d)));
+        }
+    }
 
     // 営業時間を一括取得
     const businessHoursAll = await db.queryAll(`SELECT * FROM business_hours`);
@@ -336,8 +352,9 @@ async function getAvailableDates(settings) {
             continue; // 締切過ぎ
         }
 
-        // 休診日チェック
+        // 休診日・臨時休業チェック
         if (holidayDates.has(dateStr)) continue;
+        if (closedExceptionDates.has(dateStr)) continue;
 
         // 曜日の営業時間チェック
         const businessHours = businessHoursMap[dayOfWeek];
