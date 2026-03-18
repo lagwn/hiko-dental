@@ -2882,12 +2882,12 @@ function renderDateCapacityGrid(capacities) {
     const container = document.getElementById('dateCapacityGrid');
     container.innerHTML = '';
 
-    // 特定日設定が1件でもあれば削除ボタンを表示、グリッド本体も表示を復元
+    // 特定日設定が1件でもあれば削除ボタンを表示、グリッド本体も表示
     const hasDateSpecific = capacities.some(item => item.source === 'date');
     const deleteBtn = document.getElementById('deleteDateCapacity');
     if (deleteBtn) deleteBtn.style.display = hasDateSpecific ? '' : 'none';
     const gridWrapper = container.parentElement;
-    if (gridWrapper) gridWrapper.style.display = '';
+    if (gridWrapper) gridWrapper.style.display = 'block';
 
     capacities.forEach(item => {
         const isDateSpecific = item.source === 'date';
@@ -2940,7 +2940,13 @@ document.getElementById('saveDateCapacity')?.addEventListener('click', async () 
         });
 
         showCapacityAlert('success', `${date} の設定を保存しました`);
-        await loadDateCapacity(date); // 再描画して色を更新
+        // 再取得せず、保存済みを示す色に直接更新
+        document.querySelectorAll('.date-capacity-input').forEach(input => {
+            input.style.background = '#e0f2fe';
+            input.style.borderColor = '#0284c7';
+        });
+        const deleteBtn = document.getElementById('deleteDateCapacity');
+        if (deleteBtn) deleteBtn.style.display = '';
     } catch (error) {
         showCapacityAlert('error', error.message);
     }
@@ -2960,7 +2966,7 @@ document.getElementById('deleteDateCapacity')?.addEventListener('click', async (
     try {
         await api(`/api/admin/slot-capacities/date/${date}`, { method: 'DELETE' });
         showCapacityAlert('success', `${date} の個別設定を削除しました`);
-        await loadDateCapacity(date);
+        // 再取得不要 - グリッドは非表示のまま維持
     } catch (error) {
         btn.style.display = '';
         if (gridWrapper) gridWrapper.style.display = '';
