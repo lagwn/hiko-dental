@@ -600,7 +600,6 @@ module.exports = {
     getSlotCapacity,
     formatDate,
     formatTime,
-    formatTime,
     formatDateTime
 };
 

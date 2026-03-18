@@ -751,21 +751,21 @@ app.post('/api/admin/appointments', requireAdmin, async (req, res) => {
             const startParam = startDate.toISOString();
             const endParam = endDate.toISOString();
 
-            // トークン生成
-            const crypto = require('crypto');
-            const accessToken = crypto.randomBytes(32).toString('hex');
-            const tokenExpiresAt = new Date(startDate.getTime() + 24 * 60 * 60 * 1000);
+            // トークン生成（ハッシュ化して保存）
+            const accessToken = security.generateAccessToken();
+            const tokenHash = security.hashToken(accessToken);
+            const tokenExpiresAt = security.calculateTokenExpiry();
 
             const aptRes = await client.query(`
                 INSERT INTO appointments (
-                    patient_id, service_id, start_at, end_at, status, 
+                    patient_id, service_id, start_at, end_at, status,
                     access_token_hash, token_expires_at, notes, created_at, updated_at
                 )
                 VALUES ($1, $2, $3, $4, 'confirmed', $5, $6, $7, NOW(), NOW())
                 RETURNING id
             `, [
                 patientIdToUse, serviceIdToUse, startParam, endParam,
-                accessToken, tokenExpiresAt, notes || ''
+                tokenHash, tokenExpiresAt, notes || ''
             ]);
 
             const newAptId = aptRes.rows[0].id;
@@ -967,27 +967,6 @@ app.put('/api/admin/appointments/:id', requireAdmin, async (req, res) => {
     } catch (error) {
         console.error('予約更新エラー:', error);
         res.status(500).json({ error: '予約の更新に失敗しました' });
-    }
-});
-
-// 予約削除
-app.delete('/api/admin/appointments/:id', requireAdmin, async (req, res) => {
-    try {
-        const appointmentId = req.params.id;
-
-        const appointment = await db.queryOne('SELECT * FROM appointments WHERE id = $1', [appointmentId]);
-        if (!appointment) {
-            return res.status(404).json({ error: '予約が見つかりません' });
-        }
-
-        await db.execute('DELETE FROM appointments WHERE id = $1', [appointmentId]);
-        await logAudit(req.session.adminId, 'delete_appointment', 'appointment', appointmentId, appointment, null, req);
-
-        res.json({ success: true });
-
-    } catch (error) {
-        console.error('予約削除エラー:', error);
-        res.status(500).json({ error: '予約の削除に失敗しました' });
     }
 });
 
