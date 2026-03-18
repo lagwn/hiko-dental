@@ -144,6 +144,10 @@
                             <p class="card-description"><span style="color: var(--error);">*</span>は必須項目です</p>
                         </div>
                         <div class="card-body">
+                            <div id="savedInfoBanner" style="display:none; background:#f0fdf4; border:1px solid #86efac; border-radius:8px; padding:10px 14px; margin-bottom:16px; font-size:0.875rem; color:#166534; display:none; align-items:center; justify-content:space-between; gap:8px;">
+                                <span>✓ 前回の情報が自動入力されました</span>
+                                <button type="button" id="clearSavedInfo" style="background:none; border:none; color:#166534; text-decoration:underline; cursor:pointer; font-size:0.8rem; white-space:nowrap;">別の方の情報で入力</button>
+                            </div>
                             <form id="customerForm">
                                 <div class="form-group">
                                     <label class="form-label" for="name">氏名<span class="required">*</span></label>

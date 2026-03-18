@@ -50,6 +50,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         ]);
         setupEventListeners();
         renderCalendar();
+        loadPatientInfo(); // 保存済み情報を自動入力
     } catch (error) {
         showError('データの読み込みに失敗しました。ページを再読み込みしてください。');
     }
@@ -499,6 +500,9 @@ async function submitBooking() {
 }
 
 function showComplete(result) {
+    // 予約完了時に患者情報を保存（次回自動入力のため）
+    savePatientInfo();
+
     // プログレスバーを非表示
     elements.progressContainer.style.display = 'none';
 
@@ -635,4 +639,52 @@ function showError(message) {
 
 function hideError() {
     elements.globalError.style.display = 'none';
+}
+
+// ===== 患者情報の自動入力（localStorage） =====
+const PATIENT_INFO_KEY = 'hiko_dental_patient';
+
+function savePatientInfo() {
+    try {
+        const info = {
+            name: state.customerInfo.name || '',
+            kana: state.customerInfo.kana || '',
+            phone: state.customerInfo.phone || '',
+            email: state.customerInfo.email || '',
+            address: state.customerInfo.address || ''
+        };
+        localStorage.setItem(PATIENT_INFO_KEY, JSON.stringify(info));
+    } catch (e) { /* localStorage 使用不可の場合は無視 */ }
+}
+
+function loadPatientInfo() {
+    try {
+        const saved = localStorage.getItem(PATIENT_INFO_KEY);
+        if (!saved) return;
+        const info = JSON.parse(saved);
+        if (!info.name && !info.phone) return; // 有効なデータがない場合はスキップ
+
+        if (info.name)    document.getElementById('name').value = info.name;
+        if (info.kana)    document.getElementById('kana').value = info.kana;
+        if (info.phone)   document.getElementById('phone').value = info.phone;
+        if (info.email)   document.getElementById('email').value = info.email;
+        if (info.address) document.getElementById('address').value = info.address;
+
+        // バナーを表示
+        const banner = document.getElementById('savedInfoBanner');
+        if (banner) banner.style.display = 'flex';
+
+        // クリアボタン
+        document.getElementById('clearSavedInfo')?.addEventListener('click', clearPatientInfo);
+    } catch (e) { /* 無視 */ }
+}
+
+function clearPatientInfo() {
+    try { localStorage.removeItem(PATIENT_INFO_KEY); } catch (e) {}
+    ['name', 'kana', 'phone', 'email', 'address', 'chiefComplaint'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+    });
+    const banner = document.getElementById('savedInfoBanner');
+    if (banner) banner.style.display = 'none';
 }
