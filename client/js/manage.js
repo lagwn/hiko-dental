@@ -8,7 +8,25 @@ const state = {
     admin: null,
     currentWeek: new Date(),
     appointments: [],
+    calendarRequestId: 0,
+    editSlotsRequestId: 0,
+    createSlotsRequestId: 0,
+    calendarSupportData: null,
+    calendarSupportPromise: null,
+    calendarWeekCache: new Map(),
+    calendarWeekPromises: new Map(),
+    calendarDaySchedules: new Map(),
+    slotCache: new Map(),
+    slotPromises: new Map(),
+    services: [],
+    servicesPromise: null,
     patients: [],
+    recentPatients: [],
+    createPatientSuggestions: [],
+    selectedCreatePatient: null,
+    patientSearchTimer: null,
+    patientSearchRequestId: 0,
+    editingAppointment: null,
     selectedPatient: null
 };
 
@@ -51,6 +69,153 @@ async function api(endpoint, options = {}) {
     }
 
     return data;
+}
+
+function buildWeekCacheKey(startStr, endStr) {
+    return `${startStr}|${endStr}`;
+}
+
+function buildSlotCacheKey(dateStr, serviceId, excludeAppointmentId = null) {
+    return `${dateStr}|${serviceId}|${excludeAppointmentId || ''}`;
+}
+
+function clearSlotCache() {
+    state.slotCache.clear();
+    state.slotPromises.clear();
+}
+
+function clearCalendarWeekCache() {
+    state.calendarWeekCache.clear();
+    state.calendarWeekPromises.clear();
+    state.calendarDaySchedules.clear();
+}
+
+function invalidateCalendarSupportData() {
+    state.calendarSupportData = null;
+    state.calendarSupportPromise = null;
+}
+
+function invalidateScheduleDependentCaches() {
+    invalidateCalendarSupportData();
+    clearCalendarWeekCache();
+    clearSlotCache();
+}
+
+function invalidateAppointmentDependentCaches() {
+    clearCalendarWeekCache();
+    clearSlotCache();
+}
+
+async function ensureCalendarSupportData(forceRefresh = false) {
+    if (forceRefresh) {
+        invalidateCalendarSupportData();
+    }
+
+    if (state.calendarSupportData) {
+        return state.calendarSupportData;
+    }
+
+    if (state.calendarSupportPromise) {
+        return state.calendarSupportPromise;
+    }
+
+    state.calendarSupportPromise = Promise.all([
+        api('/api/admin/business-hours'),
+        api('/api/admin/schedule-exceptions'),
+        api('/api/admin/holidays')
+    ]).then(([businessHours, scheduleExceptions, holidays]) => {
+        state.calendarSupportData = { businessHours, scheduleExceptions, holidays };
+        return state.calendarSupportData;
+    }).finally(() => {
+        state.calendarSupportPromise = null;
+    });
+
+    return state.calendarSupportPromise;
+}
+
+async function fetchWeekAppointments(startStr, endStr, forceRefresh = false) {
+    const cacheKey = buildWeekCacheKey(startStr, endStr);
+
+    if (forceRefresh) {
+        state.calendarWeekCache.delete(cacheKey);
+        state.calendarWeekPromises.delete(cacheKey);
+    }
+
+    if (state.calendarWeekCache.has(cacheKey)) {
+        return state.calendarWeekCache.get(cacheKey);
+    }
+
+    if (state.calendarWeekPromises.has(cacheKey)) {
+        return state.calendarWeekPromises.get(cacheKey);
+    }
+
+    const request = api(`/api/admin/appointments?start=${encodeURIComponent(startStr)}&end=${encodeURIComponent(endStr)}`)
+        .then((appointments) => {
+            state.calendarWeekCache.set(cacheKey, appointments);
+            return appointments;
+        })
+        .finally(() => {
+            state.calendarWeekPromises.delete(cacheKey);
+        });
+
+    state.calendarWeekPromises.set(cacheKey, request);
+    return request;
+}
+
+function prefetchCalendarWeek(startOfWeek, offsetDays) {
+    const targetStart = new Date(startOfWeek);
+    targetStart.setDate(targetStart.getDate() + offsetDays);
+    const targetEnd = new Date(targetStart);
+    targetEnd.setDate(targetEnd.getDate() + 6);
+
+    const startStr = formatDate(targetStart);
+    const endStr = `${formatDate(targetEnd)} 23:59:59`;
+    fetchWeekAppointments(startStr, endStr).catch((error) => {
+        console.warn('週データ先読みエラー:', error);
+    });
+}
+
+async function fetchAdminSlots(dateStr, serviceId, options = {}) {
+    const { excludeAppointmentId = null, forceRefresh = false } = options;
+    const cacheKey = buildSlotCacheKey(dateStr, serviceId, excludeAppointmentId);
+
+    if (forceRefresh) {
+        state.slotCache.delete(cacheKey);
+        state.slotPromises.delete(cacheKey);
+    }
+
+    if (state.slotCache.has(cacheKey)) {
+        return state.slotCache.get(cacheKey);
+    }
+
+    if (state.slotPromises.has(cacheKey)) {
+        return state.slotPromises.get(cacheKey);
+    }
+
+    const params = new URLSearchParams({
+        date: dateStr,
+        serviceId: String(serviceId)
+    });
+    if (excludeAppointmentId) {
+        params.set('excludeAppointmentId', String(excludeAppointmentId));
+    }
+
+    const request = api(`/api/admin/slots?${params.toString()}`)
+        .then((result) => {
+            state.slotCache.set(cacheKey, result);
+            return result;
+        })
+        .finally(() => {
+            state.slotPromises.delete(cacheKey);
+        });
+
+    state.slotPromises.set(cacheKey, request);
+    return request;
+}
+
+function getCachedAdminSlots(dateStr, serviceId, options = {}) {
+    const { excludeAppointmentId = null } = options;
+    return state.slotCache.get(buildSlotCacheKey(dateStr, serviceId, excludeAppointmentId)) || null;
 }
 
 // ===== ビュー切り替え =====
@@ -186,6 +351,21 @@ function setupEventListeners() {
             return;
         }
 
+        // カレンダーの空き枠
+        const timeSlot = e.target.closest('.time-slot');
+        if (timeSlot) {
+            if (timeSlot.dataset.selectable !== 'true') {
+                return;
+            }
+            const hour = String(timeSlot.dataset.hour).padStart(2, '0');
+            const minute = String(timeSlot.dataset.minute).padStart(2, '0');
+            openCreateModal({
+                date: timeSlot.dataset.date,
+                time: `${hour}:${minute}`
+            });
+            return;
+        }
+
         // 予約一覧の詳細ボタン
         if (e.target.classList.contains('view-detail-btn')) {
             const id = e.target.getAttribute('data-id');
@@ -207,6 +387,21 @@ function setupEventListeners() {
             const id = e.target.getAttribute('data-id');
             selectPatientById(id);
             closeModal();
+            return;
+        }
+
+        const patientSuggestion = e.target.closest('.patient-suggestion-item');
+        if (patientSuggestion) {
+            e.preventDefault();
+            selectCreatePatientById(patientSuggestion.getAttribute('data-id'));
+            return;
+        }
+
+        if (e.target.closest('#clearNewAptPatient')) {
+            e.preventDefault();
+            clearCreatePatientSelection({ keepName: true });
+            hideCreatePatientSuggestions();
+            document.getElementById('newAptName').focus();
             return;
         }
 
@@ -244,6 +439,10 @@ function setupEventListeners() {
             deleteService(id);
             return;
         }
+
+        if (!e.target.closest('#newAptPatientLookup')) {
+            hideCreatePatientSuggestions();
+        }
     });
 
     // mousedownでの停止（ドラッグ開始を防ぐ）
@@ -255,7 +454,211 @@ function setupEventListeners() {
 }
 
 // ===== カレンダー =====
+function normalizeDateString(dateValue) {
+    if (!dateValue) return null;
+    return String(dateValue).trim().substring(0, 10);
+}
+
+function normalizeTimeString(timeValue) {
+    if (!timeValue) return null;
+    return String(timeValue).trim().substring(0, 5);
+}
+
+function timeStringToMinutes(timeValue) {
+    const normalized = normalizeTimeString(timeValue);
+    if (!normalized) return null;
+    const [hours, minutes] = normalized.split(':').map(Number);
+    return (hours * 60) + minutes;
+}
+
+function getScheduleExceptionPriority(type) {
+    switch (type) {
+        case 'closed':
+            return 1;
+        case 'partial_closed':
+            return 2;
+        case 'modified_hours':
+            return 3;
+        case 'special_open':
+            return 4;
+        default:
+            return 99;
+    }
+}
+
+function buildCalendarTimePeriods(hours) {
+    const periods = [];
+    const addPeriod = (open, close) => {
+        const start = timeStringToMinutes(open);
+        const end = timeStringToMinutes(close);
+        if (start !== null && end !== null && start < end) {
+            periods.push({ start, end });
+        }
+    };
+
+    addPeriod(hours?.morning_open, hours?.morning_close);
+    addPeriod(hours?.afternoon_open, hours?.afternoon_close);
+
+    if (periods.length === 0) {
+        addPeriod(hours?.open_time, hours?.close_time);
+    }
+
+    return periods;
+}
+
+function getCalendarDaySchedule(date, businessHoursByDay, scheduleExceptions, holidayMap) {
+    const dateStr = formatDate(date);
+    const holiday = holidayMap.get(dateStr);
+
+    if (holiday) {
+        return {
+            isClosedDay: true,
+            closedReason: holiday.name || '休診日',
+            periods: [],
+            partialClosedPeriods: []
+        };
+    }
+
+    const scheduleException = scheduleExceptions
+        .filter(exception => {
+            const startDate = normalizeDateString(exception.start_date);
+            const endDate = normalizeDateString(exception.end_date);
+            return startDate && endDate && startDate <= dateStr && dateStr <= endDate;
+        })
+        .sort((a, b) => getScheduleExceptionPriority(a.exception_type) - getScheduleExceptionPriority(b.exception_type))[0] || null;
+
+    if (scheduleException?.exception_type === 'closed') {
+        return {
+            isClosedDay: true,
+            closedReason: scheduleException.reason || '休診日',
+            periods: [],
+            partialClosedPeriods: []
+        };
+    }
+
+    const dayOfWeek = date.getDay();
+    const baseHours = businessHoursByDay.get(dayOfWeek) || null;
+    let effectiveHours = baseHours;
+
+    if (scheduleException?.exception_type === 'special_open') {
+        effectiveHours = {
+            ...(baseHours || {}),
+            is_closed: false,
+            morning_open: normalizeTimeString(scheduleException.morning_open || baseHours?.morning_open),
+            morning_close: normalizeTimeString(scheduleException.morning_close || baseHours?.morning_close),
+            afternoon_open: normalizeTimeString(scheduleException.afternoon_open || baseHours?.afternoon_open),
+            afternoon_close: normalizeTimeString(scheduleException.afternoon_close || baseHours?.afternoon_close),
+            open_time: normalizeTimeString(scheduleException.morning_open || scheduleException.afternoon_open || baseHours?.open_time),
+            close_time: normalizeTimeString(scheduleException.afternoon_close || scheduleException.morning_close || baseHours?.close_time)
+        };
+    } else if (scheduleException?.exception_type === 'modified_hours') {
+        effectiveHours = {
+            ...(baseHours || {}),
+            is_closed: false,
+            morning_open: normalizeTimeString(scheduleException.morning_open),
+            morning_close: normalizeTimeString(scheduleException.morning_close),
+            afternoon_open: normalizeTimeString(scheduleException.afternoon_open),
+            afternoon_close: normalizeTimeString(scheduleException.afternoon_close),
+            open_time: normalizeTimeString(scheduleException.morning_open || scheduleException.afternoon_open),
+            close_time: normalizeTimeString(scheduleException.afternoon_close || scheduleException.morning_close)
+        };
+    }
+
+    if (!effectiveHours || effectiveHours.is_closed) {
+        return {
+            isClosedDay: true,
+            closedReason: '休診日',
+            periods: [],
+            partialClosedPeriods: []
+        };
+    }
+
+    const periods = buildCalendarTimePeriods(effectiveHours);
+    if (!periods.length) {
+        return {
+            isClosedDay: true,
+            closedReason: '休診日',
+            periods: [],
+            partialClosedPeriods: []
+        };
+    }
+
+    const partialClosedPeriods = scheduleException?.exception_type === 'partial_closed'
+        ? [{
+            start: timeStringToMinutes(scheduleException.start_time),
+            end: timeStringToMinutes(scheduleException.end_time)
+        }].filter(period => period.start !== null && period.end !== null && period.start < period.end)
+        : [];
+
+    return {
+        isClosedDay: false,
+        closedReason: '',
+        periods,
+        partialClosedPeriods
+    };
+}
+
+function getCalendarSlotState(daySchedule, slotStartMinutes, slotEndMinutes) {
+    if (!daySchedule || daySchedule.isClosedDay) {
+        return 'closed-day';
+    }
+
+    const isInBusinessHours = daySchedule.periods.some(period =>
+        slotStartMinutes >= period.start && slotEndMinutes <= period.end
+    );
+
+    if (!isInBusinessHours) {
+        return 'outside-hours';
+    }
+
+    const isInClosedPeriod = daySchedule.partialClosedPeriods.some(period =>
+        slotStartMinutes < period.end && slotEndMinutes > period.start
+    );
+
+    if (isInClosedPeriod) {
+        return 'closed-period';
+    }
+
+    return 'open';
+}
+
+function getCalendarSlotTitle(dateStr, timeLabel, daySchedule, slotState) {
+    switch (slotState) {
+        case 'closed-day':
+            return `${dateStr} は ${daySchedule?.closedReason || '休診日'} です`;
+        case 'outside-hours':
+            return `${dateStr} ${timeLabel} は営業時間外です`;
+        case 'closed-period':
+            return `${dateStr} ${timeLabel} は休業時間です`;
+        default:
+            return `${dateStr} ${timeLabel} に新規予約を追加`;
+    }
+}
+
+function doesServiceFitCalendarSchedule(dateStr, startTime, durationMinutes) {
+    const daySchedule = state.calendarDaySchedules.get(dateStr);
+    const startMinutes = timeStringToMinutes(startTime);
+
+    if (!daySchedule || daySchedule.isClosedDay || startMinutes === null) {
+        return false;
+    }
+
+    const endMinutes = startMinutes + durationMinutes;
+    const fitsPeriod = daySchedule.periods.some(period =>
+        startMinutes >= period.start && endMinutes <= period.end
+    );
+
+    if (!fitsPeriod) {
+        return false;
+    }
+
+    return !daySchedule.partialClosedPeriods.some(period =>
+        startMinutes < period.end && endMinutes > period.start
+    );
+}
+
 async function loadCalendar() {
+    const requestId = ++state.calendarRequestId;
     const startOfWeek = getStartOfWeek(state.currentWeek);
     const endOfWeek = new Date(startOfWeek);
     endOfWeek.setDate(endOfWeek.getDate() + 6);
@@ -269,13 +672,20 @@ async function loadCalendar() {
         // document.getElementById('calendarGrid').style.opacity = '0.5';
 
         const startStr = formatDate(startOfWeek);
-        const endStr = formatDate(endOfWeek) + ' 23:59:59';
+        const endStr = `${formatDate(endOfWeek)} 23:59:59`;
 
-        const appointments = await api(
-            `/api/admin/appointments?start=${encodeURIComponent(startStr)}&end=${encodeURIComponent(endStr)}`
-        );
+        const [appointments, calendarSupportData] = await Promise.all([
+            fetchWeekAppointments(startStr, endStr),
+            ensureCalendarSupportData()
+        ]);
 
-        renderCalendar(startOfWeek, appointments);
+        if (requestId !== state.calendarRequestId) {
+            return;
+        }
+
+        renderCalendar(startOfWeek, appointments, calendarSupportData);
+        prefetchCalendarWeek(startOfWeek, -7);
+        prefetchCalendarWeek(startOfWeek, 7);
     } catch (error) {
         console.error('カレンダー読み込みエラー:', error);
         // エラーをユーザーに通知
@@ -286,46 +696,125 @@ async function loadCalendar() {
     }
 }
 
-function renderCalendar(startOfWeek, appointments) {
+function renderCalendar(startOfWeek, appointments, calendarMeta = {}) {
     const grid = document.getElementById('calendarGrid');
     const dayNames = ['日', '月', '火', '水', '木', '金', '土'];
+    const CALENDAR_START_HOUR = 9;
+    const CALENDAR_END_HOUR = 18;
+    const SLOT_MINUTES = 30;
+    const SLOT_HEIGHT_PX = 56;
+    const BLOCK_HEIGHT_PX = 20;
+    const SLOT_VERTICAL_PADDING_PX = 4;
+    const businessHoursByDay = new Map((calendarMeta.businessHours || []).map(hours => [Number(hours.day_of_week), hours]));
+    const holidayMap = new Map((calendarMeta.holidays || [])
+        .map(holiday => [normalizeDateString(holiday.date), holiday])
+        .filter(([dateStr]) => !!dateStr));
+    const daySchedules = Array.from({ length: 7 }, (_, index) => {
+        const date = new Date(startOfWeek);
+        date.setDate(date.getDate() + index);
+        return getCalendarDaySchedule(date, businessHoursByDay, calendarMeta.scheduleExceptions || [], holidayMap);
+    });
+    state.calendarDaySchedules = new Map(daySchedules.map((schedule, index) => {
+        const date = new Date(startOfWeek);
+        date.setDate(date.getDate() + index);
+        return [formatDate(date), schedule];
+    }));
+
+    const calculateTop = (minuteInSlot) => {
+        const clampedMinute = Math.max(0, Math.min(SLOT_MINUTES - 1, minuteInSlot));
+        const denominator = Math.max(1, SLOT_MINUTES - 1);
+        const availableTrack = Math.max(0, SLOT_HEIGHT_PX - (SLOT_VERTICAL_PADDING_PX * 2) - BLOCK_HEIGHT_PX);
+        return Math.round(SLOT_VERTICAL_PADDING_PX + (clampedMinute / denominator) * availableTrack);
+    };
 
     // ヘッダー行
     let html = '<div class="calendar-week-header time-col"></div>';
     for (let i = 0; i < 7; i++) {
         const date = new Date(startOfWeek);
         date.setDate(date.getDate() + i);
-        html += `<div class="calendar-week-header">${dayNames[i]}<br>${date.getMonth() + 1}/${date.getDate()}</div>`;
+        const headerClass = daySchedules[i].isClosedDay ? ' calendar-week-header day-closed' : ' calendar-week-header';
+        const headerTitle = daySchedules[i].isClosedDay ? ` title="${escapeHtml(daySchedules[i].closedReason)}"` : '';
+        html += `<div class="${headerClass.trim()}"${headerTitle}>${dayNames[i]}<br>${date.getMonth() + 1}/${date.getDate()}</div>`;
     }
 
-    // 時間行（9:00-18:00）
-    for (let hour = 9; hour < 18; hour++) {
-        html += `<div class="time-label">${hour}:00</div>`;
+    // 時間行（30分刻み / 9:00-17:30）
+    for (let hour = CALENDAR_START_HOUR; hour < CALENDAR_END_HOUR; hour++) {
+        for (let slotMinute = 0; slotMinute < 60; slotMinute += SLOT_MINUTES) {
+            const timeLabel = `${hour}:${String(slotMinute).padStart(2, '0')}`;
+            html += `<div class="time-label">${timeLabel}</div>`;
 
-        for (let day = 0; day < 7; day++) {
-            const date = new Date(startOfWeek);
-            date.setDate(date.getDate() + day);
-            const dateStr = formatDate(date);
+            for (let day = 0; day < 7; day++) {
+                const date = new Date(startOfWeek);
+                date.setDate(date.getDate() + day);
+                const dateStr = formatDate(date);
+                const slotStartMinutes = (hour * 60) + slotMinute;
+                const slotEndMinutes = slotStartMinutes + SLOT_MINUTES;
+                const slotState = getCalendarSlotState(daySchedules[day], slotStartMinutes, slotEndMinutes);
+                const slotClasses = ['time-slot'];
 
-            // この時間帯の予約を取得
-            const hourAppointments = appointments.filter(apt => {
-                const d = new Date(apt.start_at);
-                const aptDate = formatDate(d);
-                const aptHour = d.getHours();
-                return aptDate === dateStr && aptHour === hour;
-            });
+                if (slotState !== 'open') {
+                    slotClasses.push('time-slot-unavailable', `time-slot-${slotState}`);
+                }
 
-            html += `<div class="time-slot" data-date="${dateStr}" data-hour="${hour}">`;
-            hourAppointments.forEach(apt => {
-                const d = new Date(apt.start_at);
-                const startTime = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-                html += `
-                    <div class="appointment-block ${apt.status}" data-id="${apt.id}">
-                        ${startTime} ${escapeHtml(apt.patient_name || apt.name || '名称未設定')}
-                    </div>
-                `;
-            });
-            html += '</div>';
+                // この30分枠に入る予約を取得
+                const slotAppointments = appointments.filter(apt => {
+                    const d = new Date(apt.start_at);
+                    const aptDate = formatDate(d);
+                    const aptHour = d.getHours();
+                    const aptMinute = d.getMinutes();
+                    return aptDate === dateStr && aptHour === hour && aptMinute >= slotMinute && aptMinute < slotMinute + SLOT_MINUTES;
+                });
+
+                const sortedSlotAppointments = slotAppointments
+                    .slice()
+                    .sort((a, b) => new Date(a.start_at) - new Date(b.start_at) || a.id - b.id);
+
+                // 任意分の予約に対応し、重なりが出る場合は横レーンへ自動分割する
+                const positionedAppointments = sortedSlotAppointments.map((apt) => {
+                    const startAt = new Date(apt.start_at);
+                    const minute = startAt.getMinutes();
+                    return {
+                        apt,
+                        startAt,
+                        minute,
+                        top: calculateTop(minute - slotMinute),
+                        lane: 0
+                    };
+                });
+
+                const laneBottoms = [];
+                positionedAppointments.forEach((item) => {
+                    const blockBottom = item.top + BLOCK_HEIGHT_PX;
+                    let laneIndex = laneBottoms.findIndex(bottom => item.top >= bottom);
+
+                    if (laneIndex === -1) {
+                        laneIndex = laneBottoms.length;
+                        laneBottoms.push(blockBottom);
+                    } else {
+                        laneBottoms[laneIndex] = blockBottom;
+                    }
+
+                    item.lane = laneIndex;
+                });
+
+                const laneCount = Math.max(1, laneBottoms.length);
+
+                html += `<div class="${slotClasses.join(' ')}" data-date="${dateStr}" data-hour="${hour}" data-minute="${slotMinute}" data-selectable="${slotState === 'open'}" title="${escapeHtml(getCalendarSlotTitle(dateStr, timeLabel, daySchedules[day], slotState))}">`;
+                positionedAppointments.forEach((item) => {
+                    const { apt, startAt, minute, top, lane } = item;
+                    const startTime = `${String(startAt.getHours()).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+                    const widthPct = 100 / laneCount;
+                    const leftPct = lane * widthPct;
+                    const positionStyle = `top:${top}px;left:calc(${leftPct}% + 2px);width:calc(${widthPct}% - 4px);right:auto;`;
+
+                    html += `
+                        <div class="appointment-block ${apt.status}" data-id="${apt.id}" style="${positionStyle}" title="${startTime} ${escapeHtml(apt.patient_name || apt.name || '名称未設定')}">
+                            ${startTime} ${escapeHtml(apt.patient_name || apt.name || '名称未設定')}
+                        </div>
+                    `;
+                });
+                html += '</div>';
+            }
         }
     }
 
@@ -393,8 +882,15 @@ async function exportCsv() {
 async function showAppointmentDetail(id) {
     try {
         const apt = await api(`/api/admin/appointments/${id}`);
-
         const startDate = new Date(apt.start_at);
+        const startDateValue = formatDate(startDate);
+        const startTimeValue = formatTimeValue(startDate);
+
+        state.editingAppointment = {
+            id: apt.id,
+            startAt: apt.start_at,
+            serviceId: apt.service_id
+        };
 
         document.getElementById('modalBody').innerHTML = `
             <div class="confirm-section">
@@ -403,7 +899,12 @@ async function showAppointmentDetail(id) {
             </div>
             <div class="confirm-section">
                 <div class="confirm-title">日時</div>
-                <div class="confirm-value">${formatDateTime(startDate)}</div>
+                <div class="confirm-value" style="display: flex; gap: 12px; flex-wrap: wrap;">
+                    <input type="date" id="aptDate" class="form-input" value="${startDateValue}" style="width: auto; min-width: 180px;">
+                    <select id="aptTime" class="form-input" style="width: auto; min-width: 140px;">
+                        <option value="">読み込み中...</option>
+                    </select>
+                </div>
             </div>
             <div class="confirm-section">
                 <div class="confirm-title">患者名</div>
@@ -419,7 +920,11 @@ async function showAppointmentDetail(id) {
             </div>
             <div class="confirm-section">
                 <div class="confirm-title">メニュー</div>
-                <div class="confirm-value">${escapeHtml(apt.service_name)}</div>
+                <div class="confirm-value">
+                    <select id="aptService" class="form-input" style="width: auto; min-width: 220px;">
+                        <option value="">読み込み中...</option>
+                    </select>
+                </div>
             </div>
             <div class="confirm-section">
                 <div class="confirm-title">担当</div>
@@ -454,22 +959,148 @@ async function showAppointmentDetail(id) {
         }
 
         document.getElementById('appointmentModal').classList.add('active');
+        await populateAppointmentServiceOptions(apt.service_id);
+        await loadAppointmentTimeOptions(id, startTimeValue);
+
+        document.getElementById('aptDate').addEventListener('change', () => {
+            loadAppointmentTimeOptions(id, document.getElementById('aptTime').value);
+        });
+        document.getElementById('aptService').addEventListener('change', () => {
+            loadAppointmentTimeOptions(id, document.getElementById('aptTime').value);
+        });
 
     } catch (error) {
         alert(error.message);
     }
 }
 
+async function populateAppointmentServiceOptions(selectedServiceId) {
+    const serviceSelect = document.getElementById('aptService');
+
+    try {
+        const services = state.services.length > 0 ? state.services : await fetchAdminServices();
+        const activeServices = services.filter(service =>
+            service.is_active !== false || String(service.id) === String(selectedServiceId)
+        );
+
+        serviceSelect.innerHTML = activeServices.map(service =>
+            `<option value="${service.id}" ${String(service.id) === String(selectedServiceId) ? 'selected' : ''}>${escapeHtml(service.name)} (${service.duration || service.duration_minutes}分)${service.is_active === false ? ' [無効]' : ''}</option>`
+        ).join('');
+        serviceSelect.disabled = activeServices.length === 0;
+
+        if (activeServices.length === 0) {
+            serviceSelect.innerHTML = '<option value="">利用可能なメニューがありません</option>';
+        }
+    } catch (error) {
+        serviceSelect.innerHTML = `<option value="">${escapeHtml(error.message || 'メニュー取得エラー')}</option>`;
+        serviceSelect.disabled = false;
+    }
+}
+
+async function loadAppointmentTimeOptions(appointmentId, preferredTime = '') {
+    const requestId = ++state.editSlotsRequestId;
+    const dateInput = document.getElementById('aptDate');
+    const serviceSelect = document.getElementById('aptService');
+    const timeSelect = document.getElementById('aptTime');
+
+    if (!dateInput || !serviceSelect || !timeSelect) {
+        return;
+    }
+
+    const dateStr = dateInput.value;
+    const serviceId = serviceSelect.value;
+    const originalStartDate = state.editingAppointment ? new Date(state.editingAppointment.startAt) : null;
+    const originalDateStr = originalStartDate ? formatDate(originalStartDate) : '';
+    const originalTimeStr = originalStartDate ? formatTimeValue(originalStartDate) : '';
+    const isOriginalSlotSelection = state.editingAppointment
+        && String(state.editingAppointment.id) === String(appointmentId)
+        && dateStr === originalDateStr
+        && String(serviceId) === String(state.editingAppointment.serviceId);
+
+    if (!dateStr || !serviceId) {
+        timeSelect.innerHTML = '<option value="">開始時間を選択してください</option>';
+        timeSelect.disabled = true;
+        return;
+    }
+
+    try {
+        const cachedResult = getCachedAdminSlots(dateStr, serviceId, { excludeAppointmentId: appointmentId });
+        if (!cachedResult) {
+            timeSelect.innerHTML = '<option value="">読み込み中...</option>';
+            timeSelect.disabled = true;
+        }
+
+        const result = cachedResult || await fetchAdminSlots(dateStr, serviceId, { excludeAppointmentId: appointmentId });
+        if (requestId !== state.editSlotsRequestId) {
+            return;
+        }
+        const slots = (result.slots || []).filter(slot => slot.available);
+
+        timeSelect.innerHTML = '';
+        timeSelect.disabled = false;
+
+        slots.forEach(slot => {
+            timeSelect.innerHTML += `<option value="${slot.time}">${slot.time}</option>`;
+        });
+
+        if (isOriginalSlotSelection && originalTimeStr && !timeSelect.querySelector(`option[value="${originalTimeStr}"]`)) {
+            timeSelect.innerHTML += `<option value="${originalTimeStr}">${originalTimeStr}（現在の予約）</option>`;
+        }
+
+        if (!timeSelect.options.length) {
+            timeSelect.innerHTML = '<option value="">空き枠なし</option>';
+            return;
+        }
+
+        if (isOriginalSlotSelection && originalTimeStr && timeSelect.querySelector(`option[value="${originalTimeStr}"]`)) {
+            timeSelect.value = originalTimeStr;
+        } else {
+            selectNearestTime(timeSelect, preferredTime);
+        }
+    } catch (error) {
+        console.error('編集用空き枠取得エラー:', error);
+        timeSelect.innerHTML = `<option value="">${escapeHtml(error.message || '取得エラー')}</option>`;
+        timeSelect.disabled = false;
+    }
+}
+
 async function updateAppointment(id) {
+    const dateStr = document.getElementById('aptDate').value;
+    const timeStr = document.getElementById('aptTime').value;
+    const serviceId = document.getElementById('aptService').value;
     const status = document.getElementById('aptStatus').value;
     const notes = document.getElementById('aptNotes').value;
+    const originalAppointment = state.editingAppointment;
+
+    if (!dateStr || !timeStr || !serviceId) {
+        alert('日時とメニューを入力してください');
+        return;
+    }
+
+    const payload = { status, notes };
+
+    if (originalAppointment) {
+        const originalStartDate = new Date(originalAppointment.startAt);
+        const originalDateStr = formatDate(originalStartDate);
+        const originalTimeStr = formatTimeValue(originalStartDate);
+        const hasScheduleChange =
+            dateStr !== originalDateStr ||
+            timeStr !== originalTimeStr ||
+            String(serviceId) !== String(originalAppointment.serviceId);
+
+        if (hasScheduleChange) {
+            payload.startAt = `${dateStr}T${timeStr}:00+09:00`;
+            payload.serviceId = parseInt(serviceId, 10);
+        }
+    }
 
     try {
         await api(`/api/admin/appointments/${id}`, {
             method: 'PUT',
-            body: JSON.stringify({ status, notes })
+            body: JSON.stringify(payload)
         });
 
+        invalidateAppointmentDependentCaches();
         closeModal();
         loadCalendar();
         loadAppointments();
@@ -480,6 +1111,7 @@ async function updateAppointment(id) {
 }
 
 function closeModal() {
+    state.editingAppointment = null;
     document.getElementById('appointmentModal').classList.remove('active');
 }
 
@@ -527,6 +1159,9 @@ async function loadPatients(search = '') {
     try {
         const patients = await api(`/api/admin/patients${search ? `?search=${encodeURIComponent(search)}` : ''}`);
         state.patients = patients;
+        if (!search) {
+            state.recentPatients = patients;
+        }
         renderPatientList(patients);
     } catch (error) {
         console.error('患者一覧読み込みエラー:', error);
@@ -653,6 +1288,31 @@ async function addNote(patientId) {
 }
 
 // ===== ユーティリティ =====
+
+/**
+ * preferredTime（HH:MM）に最も近い（以降の）選択肢を選ぶ。
+ * 完全一致がなければ preferredTime 以降で最初のオプション、
+ * それもなければ先頭のオプションを選択する。
+ */
+function selectNearestTime(timeSelect, preferredTime) {
+    if (!preferredTime) {
+        timeSelect.selectedIndex = 0;
+        return;
+    }
+    if (timeSelect.querySelector(`option[value="${preferredTime}"]`)) {
+        timeSelect.value = preferredTime;
+        return;
+    }
+    // preferredTime 以降で最初の空き枠
+    const options = Array.from(timeSelect.options);
+    const nearest = options.find(opt => opt.value && opt.value >= preferredTime);
+    if (nearest) {
+        timeSelect.value = nearest.value;
+    } else {
+        timeSelect.selectedIndex = 0;
+    }
+}
+
 function getStartOfWeek(date) {
     const d = new Date(date);
     const day = d.getDay();
@@ -676,6 +1336,12 @@ function formatDateTime(date) {
     const minutes = String(date.getMinutes()).padStart(2, '0');
     const dayNames = ['日', '月', '火', '水', '木', '金', '土'];
     return `${year}/${month}/${day}（${dayNames[date.getDay()]}）${hours}:${minutes}`;
+}
+
+function formatTimeValue(date) {
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    return `${hours}:${minutes}`;
 }
 
 function escapeHtml(str) {
@@ -728,10 +1394,10 @@ async function loadSettings() {
 // ===== 営業時間管理 =====
 const dayNames = ['日', '月', '火', '水', '木', '金', '土'];
 
-async function loadBusinessHours() {
+async function loadBusinessHours(forceRefresh = false) {
     try {
-        const hours = await api('/api/admin/business-hours');
-        renderBusinessHoursTable(hours);
+        const supportData = await ensureCalendarSupportData(forceRefresh);
+        renderBusinessHoursTable(supportData.businessHours || []);
     } catch (error) {
         console.error('営業時間読み込みエラー:', error);
     }
@@ -1109,12 +1775,35 @@ async function deleteAccount(id) {
 window.deleteAccount = deleteAccount;
 
 // ===== メニュー管理 =====
-async function loadServices() {
+async function fetchAdminServices(forceRefresh = false) {
+    if (!forceRefresh && state.services.length > 0) {
+        return state.services;
+    }
+
+    if (!forceRefresh && state.servicesPromise) {
+        return state.servicesPromise;
+    }
+
+    state.servicesPromise = api('/api/admin/services')
+        .then((services) => {
+            state.services = services;
+            return services;
+        })
+        .finally(() => {
+            state.servicesPromise = null;
+        });
+
+    return state.servicesPromise;
+}
+
+async function loadServices(forceRefresh = false) {
     try {
-        const services = await api('/api/admin/services');
+        const services = await fetchAdminServices(forceRefresh);
         renderServicesTable(services);
+        return services;
     } catch (error) {
         console.error('メニュー一覧読み込みエラー:', error);
+        return [];
     }
 }
 
@@ -1177,7 +1866,7 @@ document.getElementById('addServiceForm')?.addEventListener('submit', async (e) 
         alertBox.style.display = 'block';
         setTimeout(() => { alertBox.style.display = 'none'; }, 3000);
 
-        loadServices();
+        loadServices(true);
     } catch (error) {
         alertBox.className = 'alert alert-error';
         alertBox.textContent = error.message;
@@ -1197,7 +1886,7 @@ async function deleteService(id) {
 
     try {
         await api(`/api/admin/services/${id}`, { method: 'DELETE' });
-        loadServices();
+        loadServices(true);
     } catch (error) {
         alert(error.message);
     }
@@ -1259,6 +1948,7 @@ async function saveServiceOrder() {
             method: 'PUT',
             body: JSON.stringify({ ids })
         });
+        loadServices(true);
     } catch (error) {
         console.error('並び替え保存エラー:', error);
         alert('順序の保存に失敗しました');
@@ -1330,6 +2020,12 @@ function renderBusinessHoursTable(hours) {
                     method: 'PUT',
                     body: JSON.stringify(data)
                 });
+                invalidateScheduleDependentCaches();
+                await Promise.all([
+                    loadBusinessHours(),
+                    loadScheduleExceptions(),
+                    loadCalendar()
+                ]);
                 showBusinessHoursAlert('success', `${dayNames[dayOfWeek]}曜日の設定を保存しました`);
             } catch (error) {
                 showBusinessHoursAlert('error', error.message);
@@ -1356,10 +2052,10 @@ const exceptionTypeLabels = {
     'special_open': '特別営業'
 };
 
-async function loadScheduleExceptions() {
+async function loadScheduleExceptions(forceRefresh = false) {
     try {
-        const exceptions = await api('/api/admin/schedule-exceptions');
-        renderScheduleExceptionsTable(exceptions);
+        const supportData = await ensureCalendarSupportData(forceRefresh);
+        renderScheduleExceptionsTable(supportData.scheduleExceptions || []);
     } catch (error) {
         console.error('スケジュール例外読み込みエラー:', error);
     }
@@ -1476,7 +2172,11 @@ document.getElementById('addScheduleExceptionForm')?.addEventListener('submit', 
             setTimeout(() => { alertBox.style.display = 'none'; }, 3000);
         }
 
-        loadScheduleExceptions();
+        invalidateScheduleDependentCaches();
+        await Promise.all([
+            loadScheduleExceptions(),
+            loadCalendar()
+        ]);
     } catch (error) {
         if (alertBox) {
             alertBox.className = 'alert alert-error';
@@ -1506,7 +2206,11 @@ async function deleteScheduleException(id) {
 
     try {
         await api(`/api/admin/schedule-exceptions/${id}`, { method: 'DELETE' });
-        loadScheduleExceptions();
+        invalidateScheduleDependentCaches();
+        await Promise.all([
+            loadScheduleExceptions(),
+            loadCalendar()
+        ]);
     } catch (error) {
         alert(error.message);
     }
@@ -1529,6 +2233,7 @@ async function deleteAppointment(id) {
 
     try {
         await api(`/api/admin/appointments/${id}`, { method: 'DELETE' });
+        invalidateAppointmentDependentCaches();
         closeModal();
         loadCalendar();
         loadAppointments();
@@ -1540,13 +2245,15 @@ async function deleteAppointment(id) {
 // 新規予約モーダル
 const createModal = document.getElementById('createAppointmentModal');
 const createForm = document.getElementById('createAppointmentForm');
+const createPatientNameInput = document.getElementById('newAptName');
 
 // ボタンイベント
-document.getElementById('newAppointmentBtn')?.addEventListener('click', openCreateModalNew);
-document.getElementById('openCreateModalBtn')?.addEventListener('click', openCreateModalNew);
-
+document.getElementById('newAppointmentBtn')?.addEventListener('click', () => openCreateModal());
+document.getElementById('openCreateModalBtn')?.addEventListener('click', () => openCreateModal());
 document.getElementById('closeCreateModal')?.addEventListener('click', closeCreateModal);
 document.getElementById('createModalCancel')?.addEventListener('click', closeCreateModal);
+createPatientNameInput?.addEventListener('focus', () => loadCreatePatientSuggestions(createPatientNameInput.value));
+createPatientNameInput?.addEventListener('input', handleCreatePatientNameInput);
 
 document.getElementById('createModalSave')?.addEventListener('click', async () => {
     if (createForm.checkValidity()) {
@@ -1556,53 +2263,225 @@ document.getElementById('createModalSave')?.addEventListener('click', async () =
     }
 });
 
-async function openCreateModal() {
-    // メニュー読み込み
+function handleCreatePatientNameInput() {
+    if (state.patientSearchTimer) {
+        clearTimeout(state.patientSearchTimer);
+    }
+
+    if (state.selectedCreatePatient && createPatientNameInput.value.trim() !== state.selectedCreatePatient.name) {
+        clearCreatePatientSelection({ keepName: true });
+    }
+
+    state.patientSearchTimer = setTimeout(() => {
+        loadCreatePatientSuggestions(createPatientNameInput.value);
+    }, createPatientNameInput.value.trim() ? 150 : 0);
+}
+
+async function fetchRecentPatients(forceRefresh = false) {
+    if (!forceRefresh && state.recentPatients.length > 0) {
+        return state.recentPatients;
+    }
+
+    const patients = await api('/api/admin/patients');
+    state.recentPatients = patients;
+    return patients;
+}
+
+async function loadCreatePatientSuggestions(rawQuery = '') {
+    const query = rawQuery.trim();
+    const requestId = ++state.patientSearchRequestId;
+
     try {
-        const services = await api('/api/services');
-        const select = document.getElementById('newAptService');
-        // APIによっては duration または duration_minutes で返ってくるため両対応
-        select.innerHTML = services.map(s =>
-            `<option value="${s.id}">${escapeHtml(s.name)} (${s.duration || s.duration_minutes}分)</option>`
-        ).join('');
-
-        // 初期値（日付は今日）
-        const now = new Date();
-        const dStr = formatDate(now); // YYYY-MM-DD
-        document.getElementById('newAptDate').value = dStr;
-
-        // 空き枠更新
-        await updateAvailableTimes();
-
-
-
-        // 次の枠を選択
-        let nextMinutes = Math.ceil((now.getHours() * 60 + now.getMinutes()) / 30) * 30;
-        let setHours = Math.floor(nextMinutes / 60);
-        let setMinutes = nextMinutes % 60;
-
-        // 営業時間を超えていれば最後の枠or翌日だが、とりあえず単純にセット
-        const timeStr = `${String(setHours).padStart(2, '0')}:${String(setMinutes).padStart(2, '0')}`;
-        // 選択肢にあるか確認してセット
-        if (timeSelect.querySelector(`option[value="${timeStr}"]`)) {
-            timeSelect.value = timeStr;
+        let patients;
+        if (query) {
+            patients = await api(`/api/admin/patients?search=${encodeURIComponent(query)}`);
         } else {
-            timeSelect.selectedIndex = 0;
+            patients = await fetchRecentPatients();
         }
 
-        createModal.classList.add('active');
+        if (requestId !== state.patientSearchRequestId) {
+            return;
+        }
+
+        state.createPatientSuggestions = patients.slice(0, 8);
+        renderCreatePatientSuggestions(state.createPatientSuggestions, query);
+    } catch (error) {
+        console.error('患者候補取得エラー:', error);
+    }
+}
+
+function renderCreatePatientSuggestions(patients, query = '') {
+    const suggestionBox = document.getElementById('newAptPatientSuggestions');
+
+    if (!createModal.classList.contains('active')) {
+        return;
+    }
+
+    if (state.selectedCreatePatient && createPatientNameInput.value.trim() === state.selectedCreatePatient.name) {
+        suggestionBox.style.display = 'none';
+        return;
+    }
+
+    if (patients.length === 0) {
+        suggestionBox.innerHTML = `<div class="patient-suggestion-empty">${query ? '一致する患者がいません' : '登録済み患者はいません'}</div>`;
+        suggestionBox.style.display = 'block';
+        return;
+    }
+
+    suggestionBox.innerHTML = patients.map(patient => {
+        const meta = [
+            patient.phone ? `TEL: ${escapeHtml(patient.phone)}` : '電話番号未登録',
+            patient.appointment_count ? `来院${patient.appointment_count}回` : '来院履歴なし'
+        ].join(' / ');
+
+        return `
+            <button type="button" class="patient-suggestion-item" data-id="${patient.id}">
+                <div class="patient-suggestion-name">${escapeHtml(patient.name)}</div>
+                <div class="patient-suggestion-meta">${meta}</div>
+            </button>
+        `;
+    }).join('');
+    suggestionBox.style.display = 'block';
+}
+
+function hideCreatePatientSuggestions() {
+    const suggestionBox = document.getElementById('newAptPatientSuggestions');
+    suggestionBox.style.display = 'none';
+}
+
+function setCreatePatientSelection(patient) {
+    state.selectedCreatePatient = patient;
+    document.getElementById('newAptPatientId').value = patient.id;
+    createPatientNameInput.value = patient.name;
+
+    const selection = document.getElementById('newAptPatientSelection');
+    const selectionText = document.getElementById('newAptPatientSelectionText');
+    const meta = patient.phone ? ` / ${patient.phone}` : '';
+    selectionText.textContent = `既存患者として登録します: ${patient.name}${meta}`;
+    selection.style.display = 'flex';
+
+    hideCreatePatientSuggestions();
+}
+
+function clearCreatePatientSelection(options = {}) {
+    const { keepName = false } = options;
+    state.selectedCreatePatient = null;
+    document.getElementById('newAptPatientId').value = '';
+    document.getElementById('newAptPatientSelection').style.display = 'none';
+    document.getElementById('newAptPatientSelectionText').textContent = '';
+
+    if (!keepName) {
+        createPatientNameInput.value = '';
+    }
+}
+
+function selectCreatePatientById(patientId) {
+    const patient = state.createPatientSuggestions.find(item => String(item.id) === String(patientId))
+        || state.recentPatients.find(item => String(item.id) === String(patientId));
+
+    if (!patient) {
+        return;
+    }
+
+    setCreatePatientSelection(patient);
+}
+
+async function openCreateModal(options = {}) {
+    const dateInput = document.getElementById('newAptDate');
+    const serviceSelect = document.getElementById('newAptService');
+    const timeSelect = document.getElementById('newAptTime');
+    const now = new Date();
+    const requestedDate = options.date || formatDate(now);
+    const roundedMinutes = Math.ceil((now.getHours() * 60 + now.getMinutes()) / 30) * 30;
+    const defaultTime = `${String(Math.floor(roundedMinutes / 60)).padStart(2, '0')}:${String(roundedMinutes % 60).padStart(2, '0')}`;
+    const preferredTime = options.time || defaultTime;
+
+    createModal.classList.add('active');
+    dateInput.value = requestedDate;
+    clearCreatePatientSelection();
+    createPatientNameInput.focus();
+
+    if (state.services.length > 0) {
+        populateCreateServiceOptions(state.services);
+    } else {
+        serviceSelect.innerHTML = '<option value="">読み込み中...</option>';
+        serviceSelect.disabled = true;
+    }
+
+    timeSelect.innerHTML = '<option value="">読み込み中...</option>';
+    timeSelect.disabled = true;
+
+    try {
+        const services = state.services.length > 0 ? state.services : await fetchAdminServices();
+        populateCreateServiceOptions(services);
+        if (options.time) {
+            const matchingServiceId = findCreateServiceForPreferredTime(requestedDate, preferredTime, services);
+            if (matchingServiceId) {
+                serviceSelect.value = matchingServiceId;
+            }
+        }
+        await updateAvailableTimes({ preferredTime });
+        loadCreatePatientSuggestions('');
     } catch (error) {
         console.error('メニュー読み込みエラー:', error);
-        alert('メニューの読み込みに失敗しました');
+        serviceSelect.innerHTML = `<option value="">${escapeHtml(error.message || 'メニューの読み込みに失敗しました')}</option>`;
+        serviceSelect.disabled = false;
+        timeSelect.innerHTML = '<option value="">メニューを選択してください</option>';
+        timeSelect.disabled = true;
     }
+}
+
+function populateCreateServiceOptions(services) {
+    const serviceSelect = document.getElementById('newAptService');
+    const activeServices = services.filter(service => service.is_active !== false);
+
+    if (activeServices.length === 0) {
+        serviceSelect.innerHTML = '<option value="">利用可能なメニューがありません</option>';
+        serviceSelect.disabled = true;
+        return;
+    }
+
+    serviceSelect.innerHTML = activeServices.map(service =>
+        `<option value="${service.id}">${escapeHtml(service.name)} (${service.duration || service.duration_minutes}分)</option>`
+    ).join('');
+    serviceSelect.disabled = false;
+}
+
+function findCreateServiceForPreferredTime(dateStr, preferredTime, services) {
+    const activeServices = services.filter(service => service.is_active !== false);
+    if (!dateStr || !preferredTime || activeServices.length === 0) {
+        return null;
+    }
+
+    const primaryService = activeServices[0];
+    if (doesServiceFitCalendarSchedule(dateStr, preferredTime, primaryService.duration || primaryService.duration_minutes)) {
+        return String(primaryService.id);
+    }
+
+    return activeServices
+        .slice()
+        .sort((a, b) =>
+            (a.duration || a.duration_minutes) - (b.duration || b.duration_minutes)
+            || (a.sort_order || 0) - (b.sort_order || 0)
+            || a.id - b.id
+        )
+        .find(service => doesServiceFitCalendarSchedule(dateStr, preferredTime, service.duration || service.duration_minutes))?.id?.toString() || null;
 }
 
 function closeCreateModal() {
     createModal.classList.remove('active');
+    if (state.patientSearchTimer) {
+        clearTimeout(state.patientSearchTimer);
+        state.patientSearchTimer = null;
+    }
+    state.createPatientSuggestions = [];
+    hideCreatePatientSuggestions();
+    clearCreatePatientSelection();
     createForm.reset();
 }
 
 async function createAppointment() {
+    const patientIdValue = document.getElementById('newAptPatientId').value;
     const name = document.getElementById('newAptName').value;
     const dateStr = document.getElementById('newAptDate').value;
     const timeStr = document.getElementById('newAptTime').value;
@@ -1620,9 +2499,16 @@ async function createAppointment() {
     try {
         await api('/api/admin/appointments', {
             method: 'POST',
-            body: JSON.stringify({ name, startAt, serviceId, notes })
+            body: JSON.stringify({
+                patientId: patientIdValue ? parseInt(patientIdValue, 10) : null,
+                name,
+                startAt,
+                serviceId,
+                notes
+            })
         });
 
+        invalidateAppointmentDependentCaches();
         closeCreateModal();
         loadCalendar();
         loadAppointments();
@@ -1638,23 +2524,29 @@ async function createAppointment() {
 }
 
 // 日付・メニュー変更時に空き枠を再取得
-document.getElementById('newAptDate')?.addEventListener('change', updateAvailableTimes);
-document.getElementById('newAptService')?.addEventListener('change', updateAvailableTimes);
+document.getElementById('newAptDate')?.addEventListener('change', () => updateAvailableTimes());
+document.getElementById('newAptService')?.addEventListener('change', () => updateAvailableTimes());
 
-async function updateAvailableTimes() {
+async function updateAvailableTimes(options = {}) {
+    const requestId = ++state.createSlotsRequestId;
     const dateStr = document.getElementById('newAptDate').value;
     const serviceId = document.getElementById('newAptService').value;
     const timeSelect = document.getElementById('newAptTime');
+    const preferredTime = options.preferredTime || timeSelect.value;
 
     if (!dateStr || !serviceId) return;
 
-    // Loading表示
-    timeSelect.innerHTML = '<option value="">読み込み中...</option>';
-    timeSelect.disabled = true;
-
     try {
-        // 空き枠APIを呼び出す
-        const result = await api(`/api/slots?date=${dateStr}&serviceId=${serviceId}`);
+        const cachedResult = getCachedAdminSlots(dateStr, serviceId);
+        if (!cachedResult) {
+            timeSelect.innerHTML = '<option value="">読み込み中...</option>';
+            timeSelect.disabled = true;
+        }
+
+        const result = cachedResult || await fetchAdminSlots(dateStr, serviceId);
+        if (requestId !== state.createSlotsRequestId) {
+            return;
+        }
         const slots = result.slots || [];
 
         timeSelect.innerHTML = '';
@@ -1676,36 +2568,15 @@ async function updateAvailableTimes() {
 
         if (!hasAvailable) {
             timeSelect.innerHTML = '<option value="">空き枠なし</option>';
+            return;
         }
+
+        selectNearestTime(timeSelect, preferredTime);
 
     } catch (error) {
         console.error('空き枠取得エラー:', error);
-        timeSelect.innerHTML = '<option value="">取得エラー</option>';
+        timeSelect.innerHTML = `<option value="">${escapeHtml(error.message || '取得エラー')}</option>`;
         timeSelect.disabled = false;
-    }
-}
-
-async function openCreateModalNew() {
-    // メニュー読み込み
-    try {
-        const services = await api('/api/services');
-        const select = document.getElementById('newAptService');
-        select.innerHTML = services.map(s =>
-            `<option value="${s.id}">${escapeHtml(s.name)} (${s.duration || s.duration_minutes}分)</option>`
-        ).join('');
-
-        // 初期値（日付は今日）
-        const now = new Date();
-        const dStr = formatDate(now);
-        document.getElementById('newAptDate').value = dStr;
-
-        // 空き枠更新
-        await updateAvailableTimes();
-
-        createModal.classList.add('active');
-    } catch (error) {
-        console.error('メニュー読み込みエラー:', error);
-        alert('メニューの読み込みに失敗しました');
     }
 }
 
