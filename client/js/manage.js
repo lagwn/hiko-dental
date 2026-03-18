@@ -375,10 +375,12 @@ function setupEventListeners() {
             return;
         }
 
-        // 患者カード
-        const patientCard = e.target.closest('.patient-card');
-        if (patientCard) {
-            const id = patientCard.getAttribute('data-id');
+        // 患者テーブル行
+        const patientRow = e.target.closest('#patientList tr[data-id]');
+        if (patientRow) {
+            document.querySelectorAll('#patientList tr[data-id]').forEach(r => r.classList.remove('selected'));
+            patientRow.classList.add('selected');
+            const id = patientRow.getAttribute('data-id');
             selectPatient(id);
             return;
         }
@@ -1201,16 +1203,35 @@ function renderPatientList(patients) {
         return;
     }
 
-    list.innerHTML = patients.map(patient => `
-        <div class="patient-card" data-id="${patient.id}">
-            <div class="patient-name">${escapeHtml(patient.name)}</div>
-            <div class="patient-info">
-                ${escapeHtml(patient.kana)}<br>
-                ${escapeHtml(patient.phone)}
-                ${patient.appointment_count ? `<br>来院${patient.appointment_count}回` : ''}
-            </div>
-        </div>
-    `).join('');
+    list.innerHTML = `
+        <table class="patient-table">
+            <thead>
+                <tr>
+                    <th>氏名</th>
+                    <th>ふりがな</th>
+                    <th>電話番号</th>
+                    <th>メール</th>
+                    <th style="text-align:right;">来院回数</th>
+                    <th>最終来院</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${patients.map(patient => {
+                    const lastVisit = patient.last_visit ? formatDate(new Date(patient.last_visit)) : '-';
+                    const count = patient.appointment_count || 0;
+                    return `<tr data-id="${patient.id}">
+                        <td><strong>${escapeHtml(patient.name)}</strong></td>
+                        <td class="muted">${escapeHtml(patient.kana)}</td>
+                        <td>${escapeHtml(patient.phone)}</td>
+                        <td class="muted">${escapeHtml(patient.email || '-')}</td>
+                        <td style="text-align:right;">${count}回</td>
+                        <td class="muted">${lastVisit}</td>
+                    </tr>`;
+                }).join('')}
+            </tbody>
+        </table>
+        <div style="padding: 8px 0; color: var(--muted); font-size: 0.8rem; text-align: right;">${patients.length}名</div>
+    `;
 }
 
 async function selectPatient(id) {
@@ -1234,7 +1255,6 @@ async function selectPatientById(id) {
 }
 
 function renderPatientDetail(patient) {
-    document.getElementById('patientPlaceholder').style.display = 'none';
     const detail = document.getElementById('patientDetail');
     detail.style.display = 'block';
 

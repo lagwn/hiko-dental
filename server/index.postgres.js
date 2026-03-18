@@ -1024,9 +1024,9 @@ app.get('/api/admin/patients', requireAdmin, async (req, res) => {
         const { search } = req.query;
 
         let query = `
-            SELECT p.*, 
-                (SELECT COUNT(*) FROM appointments WHERE patient_id = p.id) as appointment_count,
-                (SELECT MAX(start_at) FROM appointments WHERE patient_id = p.id) as last_visit
+            SELECT p.*,
+                (SELECT COUNT(*) FROM appointments WHERE patient_id = p.id AND status = 'confirmed') as appointment_count,
+                (SELECT MAX(start_at) FROM appointments WHERE patient_id = p.id AND status = 'confirmed') as last_visit
             FROM patients p
             WHERE 1=1
         `;
@@ -1037,7 +1037,7 @@ app.get('/api/admin/patients', requireAdmin, async (req, res) => {
             params.push(`%${search}%`);
         }
 
-        query += ' ORDER BY last_visit DESC NULLS LAST, p.created_at DESC LIMIT 100';
+        query += ' ORDER BY last_visit DESC NULLS LAST, p.created_at DESC';
 
         const patients = await db.queryAll(query, params);
         res.json(patients);
