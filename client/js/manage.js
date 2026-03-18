@@ -2294,7 +2294,7 @@ document.getElementById('newAppointmentBtn')?.addEventListener('click', () => op
 document.getElementById('openCreateModalBtn')?.addEventListener('click', () => openCreateModal());
 document.getElementById('closeCreateModal')?.addEventListener('click', closeCreateModal);
 document.getElementById('createModalCancel')?.addEventListener('click', closeCreateModal);
-createPatientNameInput?.addEventListener('focus', () => loadCreatePatientSuggestions(createPatientNameInput.value));
+createPatientNameInput?.addEventListener('click', () => loadCreatePatientSuggestions(createPatientNameInput.value));
 createPatientNameInput?.addEventListener('input', handleCreatePatientNameInput);
 
 document.getElementById('createModalSave')?.addEventListener('click', async () => {
@@ -2463,7 +2463,6 @@ async function openCreateModal(options = {}) {
             }
         }
         await updateAvailableTimes({ preferredTime });
-        loadCreatePatientSuggestions('');
     } catch (error) {
         console.error('メニュー読み込みエラー:', error);
         serviceSelect.innerHTML = `<option value="">${escapeHtml(error.message || 'メニューの読み込みに失敗しました')}</option>`;
