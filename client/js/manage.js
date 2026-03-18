@@ -2944,16 +2944,19 @@ document.getElementById('saveDateCapacity')?.addEventListener('click', async () 
     }
 });
 
-document.getElementById('deleteDateCapacity')?.addEventListener('click', async () => {
+document.getElementById('deleteDateCapacity')?.addEventListener('click', async (e) => {
     const date = document.getElementById('capacityDateInput').value;
     if (!date) return;
     if (!confirm(`${date} の個別設定を削除して曜日設定に戻しますか？`)) return;
+
+    e.currentTarget.style.display = 'none';
 
     try {
         await api(`/api/admin/slot-capacities/date/${date}`, { method: 'DELETE' });
         showCapacityAlert('success', `${date} の個別設定を削除しました`);
         await loadDateCapacity(date);
     } catch (error) {
+        e.currentTarget.style.display = '';
         showCapacityAlert('error', error.message);
     }
 });
