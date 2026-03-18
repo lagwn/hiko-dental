@@ -1312,15 +1312,37 @@ async function addNote(patientId) {
     }
 }
 
-// ===== 新着予約通知（ポーリング） =====
+// ===== 新着予約通知（ポーリング＋バッジ） =====
 
 let _pollingTimer = null;
 let _lastCheckedAt = null;
+let _pendingNotifications = []; // 未読通知リスト
 
 function startAppointmentPolling() {
     _lastCheckedAt = new Date().toISOString();
     if (_pollingTimer) clearInterval(_pollingTimer);
-    _pollingTimer = setInterval(pollNewAppointments, 30000); // 30秒ごと
+    _pollingTimer = setInterval(pollNewAppointments, 30000);
+
+    // ベルボタンのクリックイベント（初回のみ設定）
+    const bell = document.getElementById('notificationBell');
+    const dropdown = document.getElementById('notificationDropdown');
+    if (bell && !bell._initialized) {
+        bell._initialized = true;
+        bell.addEventListener('click', (e) => {
+            e.stopPropagation();
+            dropdown.classList.toggle('open');
+            if (dropdown.classList.contains('open')) {
+                renderNotifDropdown();
+            }
+        });
+        document.addEventListener('click', () => dropdown.classList.remove('open'));
+        document.getElementById('notifClearBtn')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            _pendingNotifications = [];
+            updateNotifBadge();
+            dropdown.classList.remove('open');
+        });
+    }
 }
 
 async function pollNewAppointments() {
@@ -1330,7 +1352,8 @@ async function pollNewAppointments() {
         _lastCheckedAt = new Date().toISOString();
         const appointments = await api(`/api/admin/appointments/recent?since=${encodeURIComponent(since)}`);
         if (appointments && appointments.length > 0) {
-            appointments.forEach(apt => showAppointmentToast(apt));
+            appointments.forEach(apt => _pendingNotifications.unshift(apt));
+            updateNotifBadge();
             invalidateAppointmentDependentCaches();
             loadCalendar();
             loadAppointments();
@@ -1341,51 +1364,47 @@ async function pollNewAppointments() {
     }
 }
 
-function showAppointmentToast(apt) {
-    const container = document.getElementById('notificationContainer');
-    if (!container) return;
-
-    const startDate = new Date(apt.start_at);
-    const startTime = `${String(startDate.getHours()).padStart(2, '0')}:${String(startDate.getMinutes()).padStart(2, '0')}`;
-    const dateLabel = `${startDate.getMonth() + 1}/${startDate.getDate()}（${['日','月','火','水','木','金','土'][startDate.getDay()]}）`;
-
-    const toast = document.createElement('div');
-    toast.className = 'notification-toast';
-    toast.innerHTML = `
-        <div class="toast-icon">🦷</div>
-        <div class="toast-body">
-            <div class="toast-title">新規予約が入りました</div>
-            <div class="toast-main">${escapeHtml(apt.patient_name)}</div>
-            <div class="toast-sub">${dateLabel} ${startTime}〜 ${escapeHtml(apt.service_name)}</div>
-        </div>
-        <button class="toast-close" title="閉じる">✕</button>
-    `;
-
-    toast.querySelector('.toast-close').addEventListener('click', (e) => {
-        e.stopPropagation();
-        dismissToast(toast);
-    });
-
-    toast.addEventListener('click', () => {
-        // 予約カレンダータブへ移動
-        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-        document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-        const calTab = document.querySelector('.tab[data-tab="calendar"]');
-        if (calTab) {
-            calTab.classList.add('active');
-            document.getElementById('calendarTab')?.classList.add('active');
-        }
-        dismissToast(toast);
-    });
-
-    container.appendChild(toast);
-    setTimeout(() => dismissToast(toast), 8000); // 8秒後に自動削除
+function updateNotifBadge() {
+    const badge = document.getElementById('notificationBadge');
+    if (!badge) return;
+    const count = _pendingNotifications.length;
+    badge.textContent = count > 9 ? '9+' : count;
+    badge.style.display = count > 0 ? 'flex' : 'none';
 }
 
-function dismissToast(toast) {
-    if (!toast.parentNode) return;
-    toast.classList.add('hiding');
-    setTimeout(() => toast.parentNode?.removeChild(toast), 300);
+function renderNotifDropdown() {
+    const list = document.getElementById('notifList');
+    if (!list) return;
+    if (_pendingNotifications.length === 0) {
+        list.innerHTML = '<div class="notif-empty">新着予約はありません</div>';
+        return;
+    }
+    list.innerHTML = _pendingNotifications.map((apt, i) => {
+        // start_at はUTC→JSTに変換して表示
+        const jst = new Date(new Date(apt.start_at).getTime() + 9 * 60 * 60 * 1000);
+        const time = `${String(jst.getUTCHours()).padStart(2,'0')}:${String(jst.getUTCMinutes()).padStart(2,'0')}`;
+        const dateLabel = `${jst.getUTCMonth()+1}/${jst.getUTCDate()}（${['日','月','火','水','木','金','土'][jst.getUTCDay()]}）`;
+        return `<div class="notif-item" data-index="${i}">
+            <div class="notif-item-name">🦷 ${escapeHtml(apt.patient_name)}</div>
+            <div class="notif-item-detail">${dateLabel} ${time}〜 ${escapeHtml(apt.service_name)}</div>
+        </div>`;
+    }).join('');
+
+    list.querySelectorAll('.notif-item').forEach(item => {
+        item.addEventListener('click', () => {
+            // カレンダータブへ移動
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            const calTab = document.querySelector('.tab[data-tab="calendar"]');
+            if (calTab) {
+                calTab.classList.add('active');
+                document.getElementById('calendarTab')?.classList.add('active');
+            }
+            _pendingNotifications = [];
+            updateNotifBadge();
+            document.getElementById('notificationDropdown')?.classList.remove('open');
+        });
+    });
 }
 
 // ===== ユーティリティ =====

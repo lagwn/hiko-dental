@@ -425,99 +425,88 @@
         .draggable-row.drag-over {
             border-top: 2px solid var(--accent);
         }
-        /* ===== 通知トースト ===== */
-        #notificationContainer {
-            position: fixed;
-            top: 16px;
-            right: 16px;
-            z-index: 9999;
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-            pointer-events: none;
-        }
-
-        .notification-toast {
-            background: #1a1a2e;
-            color: #fff;
-            border-left: 4px solid var(--accent);
-            border-radius: 8px;
-            padding: 12px 16px;
-            min-width: 280px;
-            max-width: 360px;
-            box-shadow: 0 4px 16px rgba(0,0,0,0.25);
-            pointer-events: all;
-            cursor: pointer;
-            animation: toastIn 0.3s ease;
-            display: flex;
-            align-items: flex-start;
-            gap: 10px;
-        }
-
-        .notification-toast.hiding {
-            animation: toastOut 0.3s ease forwards;
-        }
-
-        @keyframes toastIn {
-            from { opacity: 0; transform: translateX(60px); }
-            to   { opacity: 1; transform: translateX(0); }
-        }
-
-        @keyframes toastOut {
-            from { opacity: 1; transform: translateX(0); }
-            to   { opacity: 0; transform: translateX(60px); }
-        }
-
-        .toast-icon {
-            font-size: 1.3rem;
-            flex-shrink: 0;
-            margin-top: 1px;
-        }
-
-        .toast-body {
-            flex: 1;
-            min-width: 0;
-        }
-
-        .toast-title {
-            font-size: 0.75rem;
-            opacity: 0.75;
-            margin-bottom: 2px;
-        }
-
-        .toast-main {
-            font-weight: 600;
-            font-size: 0.9rem;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-
-        .toast-sub {
-            font-size: 0.78rem;
-            opacity: 0.85;
-            margin-top: 2px;
-        }
-
-        .toast-close {
+        /* ===== 通知バッジ ===== */
+        #notificationBell {
+            position: relative;
             background: none;
             border: none;
-            color: rgba(255,255,255,0.6);
-            font-size: 1rem;
             cursor: pointer;
-            padding: 0;
-            flex-shrink: 0;
+            padding: 4px 8px;
+            color: rgba(255,255,255,0.85);
+            font-size: 1.3rem;
+            line-height: 1;
+            display: flex;
+            align-items: center;
+        }
+        #notificationBadge {
+            position: absolute;
+            top: 0;
+            right: 2px;
+            background: #ef4444;
+            color: #fff;
+            font-size: 0.65rem;
+            font-weight: 700;
+            min-width: 16px;
+            height: 16px;
+            border-radius: 8px;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 0 3px;
             line-height: 1;
         }
-
-        .toast-close:hover {
-            color: #fff;
+        #notificationDropdown {
+            display: none;
+            position: absolute;
+            top: calc(100% + 8px);
+            right: 0;
+            width: 300px;
+            background: #fff;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+            z-index: 9999;
+            overflow: hidden;
+        }
+        #notificationDropdown.open { display: block; }
+        .notif-header {
+            padding: 10px 14px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: var(--muted);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .notif-clear {
+            background: none;
+            border: none;
+            font-size: 0.75rem;
+            color: var(--accent);
+            cursor: pointer;
+            padding: 0;
+        }
+        .notif-item {
+            padding: 10px 14px;
+            border-bottom: 1px solid var(--border);
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+        .notif-item:last-child { border-bottom: none; }
+        .notif-item:hover { background: var(--surface); }
+        .notif-item-name { font-weight: 600; font-size: 0.88rem; color: var(--text); }
+        .notif-item-detail { font-size: 0.78rem; color: var(--muted); margin-top: 2px; }
+        .notif-empty {
+            padding: 20px 14px;
+            text-align: center;
+            font-size: 0.85rem;
+            color: var(--muted);
         }
     </style>
 </head>
 
 <body>
-    <div id="notificationContainer"></div>
     <div class="page">
         <!-- ログイン画面 -->
         <div id="loginView" class="login-container">
@@ -552,6 +541,18 @@
                             style="font-weight: 400; font-size: 0.875rem; color: white;">管理画面</span></a>
                     <div class="admin-nav">
                         <span id="adminName" style="color: rgba(255,255,255,0.7);"></span>
+                        <div style="position: relative;">
+                            <button id="notificationBell" title="新着予約通知">🔔
+                                <span id="notificationBadge"></span>
+                            </button>
+                            <div id="notificationDropdown">
+                                <div class="notif-header">
+                                    新着予約
+                                    <button class="notif-clear" id="notifClearBtn">すべて既読</button>
+                                </div>
+                                <div id="notifList"></div>
+                            </div>
+                        </div>
                         <button id="logoutBtn" class="btn btn-secondary"
                             style="padding: 8px 16px; font-size: 0.875rem;">ログアウト</button>
                     </div>
