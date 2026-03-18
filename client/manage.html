@@ -444,9 +444,9 @@
             align-items: center;
             justify-content: center;
             box-shadow: 0 2px 8px rgba(0,0,0,0.18);
-            font-size: 1.4rem;
+            color: #6b7280;
         }
-        #notificationBell:hover { background: #f3f4f6; }
+        #notificationBell:hover { background: #f3f4f6; color: #374151; }
         #notificationBadge {
             position: absolute;
             top: -4px;
@@ -517,7 +517,13 @@
 
 <body>
     <div id="notificationWidget">
-        <button id="notificationBell" title="新着予約通知">🔔<span id="notificationBadge"></span></button>
+        <button id="notificationBell" title="新着予約通知">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+                <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+            </svg>
+            <span id="notificationBadge"></span>
+        </button>
         <div id="notificationDropdown">
             <div class="notif-header">
                 新着予約
