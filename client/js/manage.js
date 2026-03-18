@@ -238,6 +238,8 @@ function showAdminView() {
     loadServices();
     loadAccounts();
     loadSettings();
+
+    startAppointmentPolling();
 }
 
 // ===== イベントリスナー =====
@@ -1308,6 +1310,82 @@ async function addNote(patientId) {
     } catch (error) {
         alert(error.message);
     }
+}
+
+// ===== 新着予約通知（ポーリング） =====
+
+let _pollingTimer = null;
+let _lastCheckedAt = null;
+
+function startAppointmentPolling() {
+    _lastCheckedAt = new Date().toISOString();
+    if (_pollingTimer) clearInterval(_pollingTimer);
+    _pollingTimer = setInterval(pollNewAppointments, 30000); // 30秒ごと
+}
+
+async function pollNewAppointments() {
+    if (!state.isLoggedIn || !_lastCheckedAt) return;
+    try {
+        const since = _lastCheckedAt;
+        _lastCheckedAt = new Date().toISOString();
+        const appointments = await api(`/api/admin/appointments/recent?since=${encodeURIComponent(since)}`);
+        if (appointments && appointments.length > 0) {
+            appointments.forEach(apt => showAppointmentToast(apt));
+            invalidateAppointmentDependentCaches();
+            loadCalendar();
+            loadAppointments();
+            loadPatients();
+        }
+    } catch (e) {
+        // ネットワークエラー等は無視
+    }
+}
+
+function showAppointmentToast(apt) {
+    const container = document.getElementById('notificationContainer');
+    if (!container) return;
+
+    const startDate = new Date(apt.start_at);
+    const startTime = `${String(startDate.getHours()).padStart(2, '0')}:${String(startDate.getMinutes()).padStart(2, '0')}`;
+    const dateLabel = `${startDate.getMonth() + 1}/${startDate.getDate()}（${['日','月','火','水','木','金','土'][startDate.getDay()]}）`;
+
+    const toast = document.createElement('div');
+    toast.className = 'notification-toast';
+    toast.innerHTML = `
+        <div class="toast-icon">🦷</div>
+        <div class="toast-body">
+            <div class="toast-title">新規予約が入りました</div>
+            <div class="toast-main">${escapeHtml(apt.patient_name)}</div>
+            <div class="toast-sub">${dateLabel} ${startTime}〜 ${escapeHtml(apt.service_name)}</div>
+        </div>
+        <button class="toast-close" title="閉じる">✕</button>
+    `;
+
+    toast.querySelector('.toast-close').addEventListener('click', (e) => {
+        e.stopPropagation();
+        dismissToast(toast);
+    });
+
+    toast.addEventListener('click', () => {
+        // 予約カレンダータブへ移動
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+        const calTab = document.querySelector('.tab[data-tab="calendar"]');
+        if (calTab) {
+            calTab.classList.add('active');
+            document.getElementById('calendarTab')?.classList.add('active');
+        }
+        dismissToast(toast);
+    });
+
+    container.appendChild(toast);
+    setTimeout(() => dismissToast(toast), 8000); // 8秒後に自動削除
+}
+
+function dismissToast(toast) {
+    if (!toast.parentNode) return;
+    toast.classList.add('hiding');
+    setTimeout(() => toast.parentNode?.removeChild(toast), 300);
 }
 
 // ===== ユーティリティ =====

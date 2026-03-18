@@ -2138,6 +2138,33 @@ app.get('/api/health', async (req, res) => {
     }
 });
 
+// 新着予約チェック（ポーリング用）
+app.get('/api/admin/appointments/recent', requireAdmin, async (req, res) => {
+    try {
+        const { since } = req.query;
+        if (!since) {
+            return res.status(400).json({ error: 'since パラメータが必要です' });
+        }
+
+        const appointments = await db.queryAll(`
+            SELECT
+                a.id, a.start_at, a.end_at, a.created_at,
+                s.name as service_name,
+                p.name as patient_name
+            FROM appointments a
+            JOIN services s ON a.service_id = s.id
+            JOIN patients p ON a.patient_id = p.id
+            WHERE a.created_at > $1 AND a.status = 'confirmed'
+            ORDER BY a.created_at ASC
+        `, [since]);
+
+        res.json(appointments);
+    } catch (error) {
+        console.error('新着予約チェックエラー:', error);
+        res.status(500).json({ error: '取得に失敗しました' });
+    }
+});
+
 // ===== Vercel Serverless Export =====
 // Vercelの場合はサーバーを起動せず、appをエクスポート
 if (process.env.VERCEL) {
