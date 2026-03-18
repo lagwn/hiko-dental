@@ -1315,11 +1315,17 @@ async function addNote(patientId) {
 // ===== 新着予約通知（ポーリング＋バッジ） =====
 
 let _pollingTimer = null;
-let _lastCheckedAt = null;
+let _lastKnownId = null;
 let _pendingNotifications = []; // 未読通知リスト
 
-function startAppointmentPolling() {
-    _lastCheckedAt = new Date().toISOString();
+async function startAppointmentPolling() {
+    // 起動時の最大IDを取得（既存予約を通知しないため）
+    try {
+        const { maxId } = await api('/api/admin/appointments/latest-id');
+        _lastKnownId = maxId;
+    } catch (e) {
+        _lastKnownId = 0;
+    }
     if (_pollingTimer) clearInterval(_pollingTimer);
     _pollingTimer = setInterval(pollNewAppointments, 30000);
 
@@ -1346,12 +1352,11 @@ function startAppointmentPolling() {
 }
 
 async function pollNewAppointments() {
-    if (!state.isLoggedIn || !_lastCheckedAt) return;
+    if (!state.isLoggedIn || _lastKnownId === null) return;
     try {
-        const since = _lastCheckedAt;
-        _lastCheckedAt = new Date().toISOString();
-        const appointments = await api(`/api/admin/appointments/recent?since=${encodeURIComponent(since)}`);
+        const appointments = await api(`/api/admin/appointments/recent?after_id=${_lastKnownId}`);
         if (appointments && appointments.length > 0) {
+            _lastKnownId = Math.max(...appointments.map(a => a.id));
             appointments.forEach(apt => _pendingNotifications.unshift(apt));
             updateNotifBadge();
             invalidateAppointmentDependentCaches();

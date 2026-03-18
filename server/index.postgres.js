@@ -2151,13 +2151,21 @@ app.get('/api/health', async (req, res) => {
     }
 });
 
-// 新着予約チェック（ポーリング用）
+// 現在の最大予約ID取得（ポーリング初期化用）
+app.get('/api/admin/appointments/latest-id', requireAdmin, async (req, res) => {
+    try {
+        const row = await db.queryOne(`SELECT COALESCE(MAX(id), 0) AS max_id FROM appointments WHERE status = 'confirmed'`);
+        res.json({ maxId: row.max_id });
+    } catch (error) {
+        console.error('最大ID取得エラー:', error);
+        res.status(500).json({ error: '取得に失敗しました' });
+    }
+});
+
+// 新着予約チェック（ポーリング用・ID基準）
 app.get('/api/admin/appointments/recent', requireAdmin, async (req, res) => {
     try {
-        const { since } = req.query;
-        if (!since) {
-            return res.status(400).json({ error: 'since パラメータが必要です' });
-        }
+        const afterId = parseInt(req.query.after_id) || 0;
 
         const appointments = await db.queryAll(`
             SELECT
@@ -2167,9 +2175,9 @@ app.get('/api/admin/appointments/recent', requireAdmin, async (req, res) => {
             FROM appointments a
             JOIN services s ON a.service_id = s.id
             JOIN patients p ON a.patient_id = p.id
-            WHERE a.created_at > $1 AND a.status = 'confirmed'
-            ORDER BY a.created_at ASC
-        `, [since]);
+            WHERE a.id > $1 AND a.status = 'confirmed'
+            ORDER BY a.id ASC
+        `, [afterId]);
 
         res.json(appointments);
     } catch (error) {
