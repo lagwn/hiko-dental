@@ -2933,6 +2933,14 @@ document.getElementById('saveDateCapacity')?.addEventListener('click', async () 
         });
     });
 
+    // 即時UI更新（API完了を待たない）
+    inputs.forEach(input => {
+        input.style.background = '#e0f2fe';
+        input.style.borderColor = '#0284c7';
+    });
+    const deleteBtn = document.getElementById('deleteDateCapacity');
+    if (deleteBtn) deleteBtn.style.display = '';
+
     try {
         await api(`/api/admin/slot-capacities/date/${date}`, {
             method: 'PUT',
@@ -2940,13 +2948,6 @@ document.getElementById('saveDateCapacity')?.addEventListener('click', async () 
         });
 
         showCapacityAlert('success', `${date} の設定を保存しました`);
-        // 再取得せず、保存済みを示す色に直接更新
-        document.querySelectorAll('.date-capacity-input').forEach(input => {
-            input.style.background = '#e0f2fe';
-            input.style.borderColor = '#0284c7';
-        });
-        const deleteBtn = document.getElementById('deleteDateCapacity');
-        if (deleteBtn) deleteBtn.style.display = '';
     } catch (error) {
         showCapacityAlert('error', error.message);
     }
