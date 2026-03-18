@@ -4,10 +4,158 @@
 
 const db = require('../db/db');
 
+function normalizeTimeValue(timeValue) {
+    if (!timeValue) return null;
+    const normalized = String(timeValue).trim();
+    return normalized ? normalized.substring(0, 5) : null;
+}
+
+function createJstDate(dateStr, timeStr) {
+    const normalizedTime = normalizeTimeValue(timeStr);
+    if (!normalizedTime) return null;
+
+    const [hour, minute] = normalizedTime.split(':');
+    return new Date(`${dateStr}T${hour}:${minute}:00+09:00`);
+}
+
+function buildTimePeriods(businessHours, settings = {}) {
+    const periods = [];
+    const addPeriod = (open, close) => {
+        const normalizedOpen = normalizeTimeValue(open);
+        const normalizedClose = normalizeTimeValue(close);
+        if (normalizedOpen && normalizedClose && normalizedOpen < normalizedClose) {
+            periods.push({ open: normalizedOpen, close: normalizedClose });
+        }
+    };
+
+    addPeriod(businessHours?.morning_open, businessHours?.morning_close);
+    addPeriod(businessHours?.afternoon_open, businessHours?.afternoon_close);
+
+    if (periods.length === 0) {
+        const openTime = normalizeTimeValue(businessHours?.open_time);
+        const closeTime = normalizeTimeValue(businessHours?.close_time);
+        const lunchStart = normalizeTimeValue(settings.lunch_start);
+        const lunchEnd = normalizeTimeValue(settings.lunch_end);
+
+        if (openTime && closeTime) {
+            if (lunchStart && lunchEnd && openTime < lunchStart && lunchEnd < closeTime) {
+                addPeriod(openTime, lunchStart);
+                addPeriod(lunchEnd, closeTime);
+            } else {
+                addPeriod(openTime, closeTime);
+            }
+        }
+    }
+
+    return periods;
+}
+
+async function getScheduleException(dateStr) {
+    return db.queryOne(`
+        SELECT * FROM schedule_exceptions
+        WHERE $1 BETWEEN start_date AND end_date
+        ORDER BY
+            CASE exception_type
+                WHEN 'closed' THEN 1
+                WHEN 'partial_closed' THEN 2
+                WHEN 'modified_hours' THEN 3
+                WHEN 'special_open' THEN 4
+                ELSE 99
+            END
+        LIMIT 1
+    `, [dateStr]);
+}
+
+async function resolveScheduleForDate(dateStr, targetDate, settings) {
+    const dayOfWeek = targetDate.getDay();
+
+    // 3つのDBクエリを並列実行
+    const [holiday, scheduleException, baseBusinessHours] = await Promise.all([
+        db.queryOne(`SELECT * FROM holidays WHERE date = $1`, [dateStr]),
+        getScheduleException(dateStr),
+        db.queryOne(`SELECT * FROM business_hours WHERE day_of_week = $1`, [dayOfWeek])
+    ]);
+
+    if (holiday) {
+        return { error: `${holiday.name || '休診日'}のため予約できません`, scheduleException: null, timePeriods: [] };
+    }
+
+    if (scheduleException && scheduleException.exception_type === 'closed') {
+        return { error: `${scheduleException.reason || '臨時休業'}のため予約できません`, scheduleException, timePeriods: [] };
+    }
+
+    let businessHours = baseBusinessHours;
+
+    if (scheduleException && scheduleException.exception_type === 'special_open') {
+        businessHours = {
+            ...(baseBusinessHours || {}),
+            day_of_week: dayOfWeek,
+            is_closed: false,
+            open_time: normalizeTimeValue(scheduleException.morning_open || scheduleException.afternoon_open || baseBusinessHours?.open_time),
+            close_time: normalizeTimeValue(scheduleException.afternoon_close || scheduleException.morning_close || baseBusinessHours?.close_time),
+            morning_open: normalizeTimeValue(scheduleException.morning_open || baseBusinessHours?.morning_open),
+            morning_close: normalizeTimeValue(scheduleException.morning_close || baseBusinessHours?.morning_close),
+            afternoon_open: normalizeTimeValue(scheduleException.afternoon_open || baseBusinessHours?.afternoon_open),
+            afternoon_close: normalizeTimeValue(scheduleException.afternoon_close || baseBusinessHours?.afternoon_close)
+        };
+    } else if (scheduleException && scheduleException.exception_type === 'modified_hours') {
+        businessHours = {
+            ...(baseBusinessHours || {}),
+            day_of_week: dayOfWeek,
+            is_closed: false,
+            open_time: normalizeTimeValue(scheduleException.morning_open || scheduleException.afternoon_open),
+            close_time: normalizeTimeValue(scheduleException.afternoon_close || scheduleException.morning_close),
+            morning_open: normalizeTimeValue(scheduleException.morning_open),
+            morning_close: normalizeTimeValue(scheduleException.morning_close),
+            afternoon_open: normalizeTimeValue(scheduleException.afternoon_open),
+            afternoon_close: normalizeTimeValue(scheduleException.afternoon_close)
+        };
+    }
+
+    if (!businessHours || businessHours.is_closed) {
+        return { error: '休診日です', scheduleException, timePeriods: [] };
+    }
+
+    const timePeriods = buildTimePeriods(businessHours, settings);
+    if (timePeriods.length === 0) {
+        return { error: '営業時間が設定されていません', scheduleException, timePeriods: [] };
+    }
+
+    return { error: null, dayOfWeek, businessHours, scheduleException, timePeriods };
+}
+
+function isInPartialClosedPeriod(dateStr, slotStart, slotEnd, scheduleException) {
+    if (!scheduleException || scheduleException.exception_type !== 'partial_closed') {
+        return false;
+    }
+
+    const closedStart = createJstDate(dateStr, scheduleException.start_time);
+    const closedEnd = createJstDate(dateStr, scheduleException.end_time);
+    if (!closedStart || !closedEnd) {
+        return false;
+    }
+
+    return slotStart < closedEnd && slotEnd > closedStart;
+}
+
+function isWithinTimePeriods(dateStr, startDate, endDate, timePeriods) {
+    return timePeriods.some(period => {
+        const openTime = createJstDate(dateStr, period.open);
+        const closeTime = createJstDate(dateStr, period.close);
+        return openTime && closeTime && startDate >= openTime && endDate <= closeTime;
+    });
+}
+
 /**
  * 指定日の空き時間スロットを取得
  */
-async function getAvailableSlots(dateStr, serviceId, staffId, settings) {
+async function getAvailableSlots(dateStr, serviceId, staffId, settings, options = {}) {
+    const {
+        ignoreBookingWindow = false,
+        ignoreMaxDaysAhead = false,
+        ignorePastTime = false,
+        excludeAppointmentId = null
+    } = options;
     const now = new Date();
     const targetDate = new Date(dateStr);
 
@@ -26,7 +174,7 @@ async function getAvailableSlots(dateStr, serviceId, staffId, settings) {
     maxDate.setDate(maxDate.getDate() + maxDaysAhead);
     maxDate.setHours(23, 59, 59, 999);
 
-    if (targetDate > maxDate) {
+    if (!ignoreMaxDaysAhead && targetDate > maxDate) {
         return { error: `予約は${maxDaysAhead}日先までです`, slots: [] };
     }
 
@@ -35,33 +183,44 @@ async function getAvailableSlots(dateStr, serviceId, staffId, settings) {
     cutoffDate.setDate(cutoffDate.getDate() - cutoffDays);
     cutoffDate.setHours(23 - cutoffHours, 59, 59, 999);
 
-    if (now > cutoffDate) {
+    if (!ignoreBookingWindow && now > cutoffDate) {
         return { error: `この日の予約受付は終了しました（${cutoffDays}日前 ${24 - cutoffHours}:00まで）`, slots: [] };
     }
 
-    // 休診日チェック
-    const holiday = await db.queryOne(`
-        SELECT * FROM holidays WHERE date = $1
-    `, [dateStr]);
-
-    if (holiday) {
-        return { error: `${holiday.name || '休診日'}のため予約できません`, slots: [] };
+    const schedule = await resolveScheduleForDate(dateStr, targetDate, settings);
+    if (schedule.error) {
+        return { error: schedule.error, slots: [] };
     }
 
-    // 曜日の営業時間取得
-    const dayOfWeek = targetDate.getDay();
-    const businessHours = await db.queryOne(`
-        SELECT * FROM business_hours WHERE day_of_week = $1
-    `, [dayOfWeek]);
+    const dayOfWeek = schedule.dayOfWeek;
 
-    if (!businessHours || businessHours.is_closed) {
-        return { error: '休診日です', slots: [] };
-    }
+    // JSTでの一日の範囲を指定して取得する（タイムゾーンによる検索漏れを防ぐため）
+    const startOfDay = new Date(`${dateStr}T00:00:00+09:00`);
+    const endOfDay = new Date(`${dateStr}T23:59:59.999+09:00`);
 
-    // サービスの所要時間取得
-    const service = await db.queryOne(`
-        SELECT duration_minutes FROM services WHERE id = $1 AND is_active = true
-    `, [serviceId]);
+    const queryBase = `
+        SELECT start_at, end_at, staff_id FROM appointments
+        WHERE start_at >= $1 AND start_at <= $2 AND status = 'confirmed'
+        ${excludeAppointmentId ? 'AND id <> $3' : ''}
+    `;
+    const appointmentsQuery = staffId
+        ? db.queryAll(
+            queryBase + ` AND (staff_id = $${excludeAppointmentId ? 4 : 3} OR staff_id IS NULL)`,
+            excludeAppointmentId
+                ? [startOfDay, endOfDay, excludeAppointmentId, staffId]
+                : [startOfDay, endOfDay, staffId]
+        )
+        : db.queryAll(
+            queryBase,
+            excludeAppointmentId ? [startOfDay, endOfDay, excludeAppointmentId] : [startOfDay, endOfDay]
+        );
+
+    // サービス・既存予約・キャパシティを並列取得
+    const [service, existingAppointments, capacityMap] = await Promise.all([
+        db.queryOne(`SELECT duration_minutes FROM services WHERE id = $1 AND is_active = true`, [serviceId]),
+        appointmentsQuery,
+        fetchSlotCapacities(dayOfWeek, dateStr)
+    ]);
 
     if (!service) {
         return { error: '無効なメニューです', slots: [] };
@@ -70,108 +229,65 @@ async function getAvailableSlots(dateStr, serviceId, staffId, settings) {
     const slotDuration = parseInt(settings.slot_duration_minutes) || 30;
     const serviceDuration = service.duration_minutes;
 
-    // 昼休み
-    const lunchStart = settings.lunch_start || '12:00';
-    const lunchEnd = settings.lunch_end || '13:00';
-
-    // スロット生成（JST +09:00 を基準にする）
-    const createJstDate = (timeStr) => {
-        // timeStr: "HH:mm"
-        const [h, m] = timeStr.trim().split(':');
-        /* 
-           dateStr (YYYY-MM-DD) と timeStr (HH:mm) を結合して JSTのDateを作る。
-           ISO形式: YYYY-MM-DDTHH:mm:00+09:00
-        */
-        return new Date(`${dateStr}T${h}:${m}:00+09:00`);
-    };
-
-    let currentTime = createJstDate(businessHours.open_time);
-    const closeTime = createJstDate(businessHours.close_time);
-    const lunchStartTime = createJstDate(lunchStart);
-    const lunchEndTime = createJstDate(lunchEnd);
-
-    // 既存予約取得
-    // JSTでの一日の範囲を指定して取得する（タイムゾーンによる検索漏れを防ぐため）
-    const startOfDay = new Date(`${dateStr}T00:00:00+09:00`);
-    const endOfDay = new Date(`${dateStr}T23:59:59.999+09:00`);
-
-    let existingAppointments;
-    const queryBase = `
-        SELECT start_at, end_at, staff_id FROM appointments 
-        WHERE start_at >= $1 AND start_at <= $2 AND status = 'confirmed'
-    `;
-
-    if (staffId) {
-        existingAppointments = await db.queryAll(
-            queryBase + ' AND (staff_id = $3 OR staff_id IS NULL)',
-            [startOfDay, endOfDay, staffId]
-        );
-    } else {
-        existingAppointments = await db.queryAll(
-            queryBase,
-            [startOfDay, endOfDay]
-        );
-    }
-
-    // キャパシティ設定を一括取得（N+1問題解消）
-    const capacityMap = await fetchSlotCapacities(dayOfWeek, dateStr);
-
     const slots = [];
-    while (currentTime < closeTime) {
-        const slotEnd = new Date(currentTime.getTime() + serviceDuration * 60000);
+    for (const period of schedule.timePeriods) {
+        let currentTime = createJstDate(dateStr, period.open);
+        const closeTime = createJstDate(dateStr, period.close);
 
-        // 営業時間内かチェック
-        if (slotEnd > closeTime) break;
-
-        // 昼休みチェック
-        const isLunchTime =
-            (currentTime >= lunchStartTime && currentTime < lunchEndTime) ||
-            (slotEnd > lunchStartTime && slotEnd <= lunchEndTime) ||
-            (currentTime < lunchStartTime && slotEnd > lunchEndTime);
-
-        if (!isLunchTime) {
-            // 予約済みチェック
-            const slotStartStr = formatDateTime(currentTime);
-            const slotEndStr = formatDateTime(slotEnd);
-            const timeSlotStr = formatTime(currentTime); // "09:00" 形式
-
-            // この時間帯と重複する予約数をカウント
-            const bookingCount = existingAppointments.filter(apt => {
-                // スタッフ指名がある場合は、同じスタッフの予約のみチェック
-                if (staffId && apt.staff_id && apt.staff_id !== staffId) {
-                    return false;
-                }
-                // 時間重複チェック
-                const aptStart = new Date(apt.start_at);
-                const aptEnd = new Date(apt.end_at);
-                return (currentTime < aptEnd && slotEnd > aptStart);
-            }).length;
-
-            // この時間枠のキャパシティを取得（Mapから参照）
-            let capacity = capacityMap.get(timeSlotStr);
-            if (capacity === undefined) {
-                capacity = parseInt(settings.default_slot_capacity) || 1;
-            }
-            const isAvailable = bookingCount < capacity;
-
-            // 現在時刻より後のスロットのみ追加
-            const slotDateTime = new Date(currentTime);
-            if (slotDateTime > now) {
-                slots.push({
-                    time: formatTime(currentTime),
-                    start: formatTime(currentTime),
-                    end: formatTime(slotEnd),
-                    startAt: slotStartStr,
-                    endAt: slotEndStr,
-                    available: isAvailable,
-                    bookingCount: bookingCount,
-                    capacity: capacity
-                });
-            }
+        if (!currentTime || !closeTime) {
+            continue;
         }
 
-        // 次のスロットへ
-        currentTime.setMinutes(currentTime.getMinutes() + slotDuration);
+        while (currentTime < closeTime) {
+            const slotEnd = new Date(currentTime.getTime() + serviceDuration * 60000);
+
+            // 営業時間内かチェック
+            if (slotEnd > closeTime) break;
+
+            if (!isInPartialClosedPeriod(dateStr, currentTime, slotEnd, schedule.scheduleException)) {
+                // 予約済みチェック
+                const slotStartStr = formatDateTime(currentTime);
+                const slotEndStr = formatDateTime(slotEnd);
+                const timeSlotStr = formatTime(currentTime); // "09:00" 形式
+
+                // この時間帯と重複する予約数をカウント
+                const bookingCount = existingAppointments.filter(apt => {
+                    // スタッフ指名がある場合は、同じスタッフの予約のみチェック
+                    if (staffId && apt.staff_id && apt.staff_id !== staffId) {
+                        return false;
+                    }
+                    // 時間重複チェック
+                    const aptStart = new Date(apt.start_at);
+                    const aptEnd = new Date(apt.end_at);
+                    return (currentTime < aptEnd && slotEnd > aptStart);
+                }).length;
+
+                // この時間枠のキャパシティを取得（Mapから参照）
+                let capacity = capacityMap.get(timeSlotStr);
+                if (capacity === undefined) {
+                    capacity = parseInt(settings.default_slot_capacity) || 1;
+                }
+                const isAvailable = bookingCount < capacity;
+
+                // 現在時刻より後のスロットのみ追加
+                const slotDateTime = new Date(currentTime);
+                if (ignorePastTime || slotDateTime > now) {
+                    slots.push({
+                        time: formatTime(currentTime),
+                        start: formatTime(currentTime),
+                        end: formatTime(slotEnd),
+                        startAt: slotStartStr,
+                        endAt: slotEndStr,
+                        available: isAvailable,
+                        bookingCount: bookingCount,
+                        capacity: capacity
+                    });
+                }
+            }
+
+            // 次のスロットへ
+            currentTime.setMinutes(currentTime.getMinutes() + slotDuration);
+        }
     }
 
     return { slots, error: null };
@@ -243,7 +359,13 @@ async function getAvailableDates(settings) {
 /**
  * 予約の有効性を検証（サーバーサイド）
  */
-async function validateBooking(startAt, endAt, serviceId, staffId, settings) {
+async function validateBooking(startAt, endAt, serviceId, staffId, settings, options = {}) {
+    const {
+        ignoreBookingWindow = false,
+        ignoreMaxDaysAhead = false,
+        ignorePastTime = false,
+        excludeAppointmentId = null
+    } = options;
     const now = new Date();
     const startDate = new Date(startAt);
     const endDate = new Date(endAt);
@@ -268,7 +390,7 @@ async function validateBooking(startAt, endAt, serviceId, staffId, settings) {
     maxDate.setDate(maxDate.getDate() + maxDaysAhead);
     maxDate.setHours(23, 59, 59, 999);
 
-    if (startDate > maxDate) {
+    if (!ignoreMaxDaysAhead && startDate > maxDate) {
         return { valid: false, error: `予約は${maxDaysAhead}日先までです` };
     }
 
@@ -277,32 +399,18 @@ async function validateBooking(startAt, endAt, serviceId, staffId, settings) {
     cutoffDate.setDate(cutoffDate.getDate() - cutoffDays);
     cutoffDate.setHours(23 - cutoffHours, 59, 59, 999);
 
-    if (now > cutoffDate) {
+    if (!ignoreBookingWindow && now > cutoffDate) {
         return { valid: false, error: `この日の予約受付は終了しました` };
     }
 
     // 過去の日時チェック
-    if (startDate <= now) {
+    if (!ignorePastTime && startDate <= now) {
         return { valid: false, error: '過去の日時は予約できません' };
     }
 
-    // 休診日チェック
-    const holiday = await db.queryOne(`
-        SELECT * FROM holidays WHERE date = $1
-    `, [dateStr]);
-
-    if (holiday) {
-        return { valid: false, error: '休診日のため予約できません' };
-    }
-
-    // 営業時間チェック
-    const dayOfWeek = startDate.getDay();
-    const businessHours = await db.queryOne(`
-        SELECT * FROM business_hours WHERE day_of_week = $1
-    `, [dayOfWeek]);
-
-    if (!businessHours || businessHours.is_closed) {
-        return { valid: false, error: '休診日です' };
+    const schedule = await resolveScheduleForDate(dateStr, startDate, settings);
+    if (schedule.error) {
+        return { valid: false, error: schedule.error };
     }
 
     // サービス存在チェック
@@ -333,7 +441,8 @@ async function validateBooking(startAt, endAt, serviceId, staffId, settings) {
             WHERE status = 'confirmed'
             AND start_at < $1 AND end_at > $2
             AND (staff_id = $3 OR staff_id IS NULL)
-        `, [endAt, startAt, staffId]);
+            ${excludeAppointmentId ? 'AND id <> $4' : ''}
+        `, excludeAppointmentId ? [endAt, startAt, staffId, excludeAppointmentId] : [endAt, startAt, staffId]);
 
         if (conflict) {
             return { valid: false, error: 'この担当者はその時間帯に予約が入っています' };
@@ -344,7 +453,8 @@ async function validateBooking(startAt, endAt, serviceId, staffId, settings) {
             SELECT * FROM appointments 
             WHERE status = 'confirmed'
             AND start_at < $1 AND end_at > $2
-        `, [endAt, startAt]);
+            ${excludeAppointmentId ? 'AND id <> $3' : ''}
+        `, excludeAppointmentId ? [endAt, startAt, excludeAppointmentId] : [endAt, startAt]);
 
         const bookingCount = conflicts.length;
 
@@ -352,11 +462,19 @@ async function validateBooking(startAt, endAt, serviceId, staffId, settings) {
         const timeSlotStr = formatTime(startDate);
 
         // キャパシティ取得
-        const capacity = await getSlotCapacity(dayOfWeek, timeSlotStr, settings, dateStr);
+        const capacity = await getSlotCapacity(schedule.dayOfWeek, timeSlotStr, settings, dateStr);
 
         if (bookingCount >= capacity) {
             return { valid: false, error: 'この時間帯は満席です' };
         }
+    }
+
+    if (!isWithinTimePeriods(dateStr, startDate, endDate, schedule.timePeriods)) {
+        return { valid: false, error: '営業時間外のため予約できません' };
+    }
+
+    if (isInPartialClosedPeriod(dateStr, startDate, endDate, schedule.scheduleException)) {
+        return { valid: false, error: 'この時間帯は休業です' };
     }
 
     return { valid: true, error: null };

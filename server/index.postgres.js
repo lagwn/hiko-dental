@@ -81,13 +81,28 @@ app.use(express.static(path.join(__dirname, '..', 'client')));
 
 // ===== ヘルパー関数 =====
 
-async function getSettings() {
+let settingsCache = null;
+let settingsCacheAt = 0;
+const SETTINGS_CACHE_TTL_MS = 30000; // 30秒
+
+async function getSettings(forceRefresh = false) {
+    const now = Date.now();
+    if (!forceRefresh && settingsCache && (now - settingsCacheAt) < SETTINGS_CACHE_TTL_MS) {
+        return settingsCache;
+    }
     const rows = await db.queryAll('SELECT key, value FROM settings');
     const settings = {};
     for (const row of rows) {
         settings[row.key] = row.value;
     }
+    settingsCache = settings;
+    settingsCacheAt = now;
     return settings;
+}
+
+function invalidateSettingsCache() {
+    settingsCache = null;
+    settingsCacheAt = 0;
 }
 
 function requireAdmin(req, res, next) {
@@ -183,6 +198,40 @@ app.get('/api/slots', async (req, res) => {
         res.json({ slots: result.slots });
     } catch (error) {
         console.error('スロット取得エラー:', error);
+        res.status(500).json({ error: '空き時間の取得に失敗しました' });
+    }
+});
+
+// 空き時間スロット（管理者用）
+app.get('/api/admin/slots', requireAdmin, async (req, res) => {
+    try {
+        const { date, serviceId, staffId, excludeAppointmentId } = req.query;
+
+        if (!date || !serviceId) {
+            return res.status(400).json({ error: '日付とメニューを指定してください' });
+        }
+
+        const settings = await getSettings();
+        const result = await slots.getAvailableSlots(
+            date,
+            parseInt(serviceId),
+            staffId ? parseInt(staffId) : null,
+            settings,
+            {
+                ignoreBookingWindow: true,
+                ignoreMaxDaysAhead: true,
+                ignorePastTime: true,
+                excludeAppointmentId: excludeAppointmentId ? parseInt(excludeAppointmentId, 10) : null
+            }
+        );
+
+        if (result.error) {
+            return res.status(400).json({ error: result.error, slots: [] });
+        }
+
+        res.json({ slots: result.slots });
+    } catch (error) {
+        console.error('管理者スロット取得エラー:', error);
         res.status(500).json({ error: '空き時間の取得に失敗しました' });
     }
 });
@@ -615,24 +664,44 @@ app.delete('/api/admin/appointments/:id', requireAdmin, async (req, res) => {
 // 新規予約作成 (管理者・電話予約用)
 app.post('/api/admin/appointments', requireAdmin, async (req, res) => {
     try {
-        const { name, startAt, serviceId, notes } = req.body;
+        const { patientId, name, startAt, serviceId, notes } = req.body;
+        const parsedPatientId = patientId ? parseInt(patientId, 10) : null;
 
         if (!name || !startAt) {
             return res.status(400).json({ error: '名前と日時は必須です' });
+        }
+
+        if (patientId && (!parsedPatientId || parsedPatientId < 1)) {
+            return res.status(400).json({ error: '患者情報が不正です' });
         }
 
         const client = await db.getPool().connect();
         try {
             await client.query('BEGIN');
 
-            // 1. 患者登録（電話番号・カナは空でOK）
-            const patientRes = await client.query(`
-                INSERT INTO patients (name, kana, phone, created_at, updated_at)
-                VALUES ($1, $2, $3, NOW(), NOW())
-                RETURNING id
-            `, [name, '', '']);
+            let patientIdToUse = parsedPatientId;
+            let patientNameToUse = name;
 
-            const patientId = patientRes.rows[0].id;
+            if (patientIdToUse) {
+                const existingPatient = await client.query(`
+                    SELECT id, name FROM patients WHERE id = $1
+                `, [patientIdToUse]);
+
+                if (existingPatient.rowCount === 0) {
+                    await client.query('ROLLBACK');
+                    return res.status(404).json({ error: '患者が見つかりません' });
+                }
+
+                patientNameToUse = existingPatient.rows[0].name;
+            } else {
+                const patientRes = await client.query(`
+                    INSERT INTO patients (name, kana, phone, created_at, updated_at)
+                    VALUES ($1, $2, $3, NOW(), NOW())
+                    RETURNING id
+                `, [name, '', '']);
+
+                patientIdToUse = patientRes.rows[0].id;
+            }
 
             // 2. 予約作成
             const serviceIdToUse = serviceId || 1;
@@ -659,7 +728,7 @@ app.post('/api/admin/appointments', requireAdmin, async (req, res) => {
                 VALUES ($1, $2, $3, $4, 'confirmed', $5, $6, $7, NOW(), NOW())
                 RETURNING id
             `, [
-                patientId, serviceIdToUse, startParam, endParam,
+                patientIdToUse, serviceIdToUse, startParam, endParam,
                 accessToken, tokenExpiresAt, notes || ''
             ]);
 
@@ -670,7 +739,7 @@ app.post('/api/admin/appointments', requireAdmin, async (req, res) => {
             // ログ記録
             await logAudit(
                 req.session.adminId, 'create_appointment_phone', 'appointment',
-                newAptId, null, { name, startAt }, req
+                newAptId, null, { name: patientNameToUse, patientId: patientIdToUse, startAt }, req
             );
 
             res.json({ success: true, message: '予約を作成しました' });
@@ -719,7 +788,7 @@ app.get('/api/admin/appointments/:id', requireAdmin, async (req, res) => {
 // 予約更新
 app.put('/api/admin/appointments/:id', requireAdmin, async (req, res) => {
     try {
-        const { status, notes } = req.body;
+        const { status, notes, startAt, serviceId } = req.body;
         const appointmentId = req.params.id;
 
         const oldAppointment = await db.queryOne('SELECT * FROM appointments WHERE id = $1', [appointmentId]);
@@ -727,16 +796,96 @@ app.put('/api/admin/appointments/:id', requireAdmin, async (req, res) => {
             return res.status(404).json({ error: '予約が見つかりません' });
         }
 
-        if (status) {
-            await db.execute(`
-                UPDATE appointments SET status = $1, updated_at = NOW() WHERE id = $2
-            `, [status, appointmentId]);
+        const parsedServiceId = serviceId !== undefined ? parseInt(serviceId, 10) : oldAppointment.service_id;
+        if (!parsedServiceId || parsedServiceId < 1) {
+            return res.status(400).json({ error: 'メニューが不正です' });
+        }
+
+        const originalStartMs = new Date(oldAppointment.start_at).getTime();
+        const requestedStartAt = startAt || oldAppointment.start_at;
+        const requestedStartMs = new Date(requestedStartAt).getTime();
+        const hasScheduleChange = (
+            startAt !== undefined && requestedStartMs !== originalStartMs
+        ) || (
+            serviceId !== undefined && parsedServiceId !== oldAppointment.service_id
+        );
+
+        let nextStartAt = oldAppointment.start_at;
+        let nextEndAt = oldAppointment.end_at;
+        let nextServiceId = oldAppointment.service_id;
+
+        if (hasScheduleChange) {
+            const service = await db.queryOne(`
+                SELECT duration_minutes FROM services WHERE id = $1 AND is_active = true
+            `, [parsedServiceId]);
+
+            if (!service) {
+                return res.status(400).json({ error: '無効なメニューです' });
+            }
+
+            const nextStartDate = new Date(requestedStartAt);
+            if (Number.isNaN(nextStartDate.getTime())) {
+                return res.status(400).json({ error: '日時が不正です' });
+            }
+
+            const nextEndDate = new Date(nextStartDate.getTime() + service.duration_minutes * 60000);
+            const nextStartIso = nextStartDate.toISOString();
+            const nextEndIso = nextEndDate.toISOString();
+            const settings = await getSettings();
+
+            const bookingValidation = await slots.validateBooking(
+                nextStartIso,
+                nextEndIso,
+                parsedServiceId,
+                oldAppointment.staff_id,
+                settings,
+                {
+                    ignoreBookingWindow: true,
+                    ignoreMaxDaysAhead: true,
+                    ignorePastTime: true,
+                    excludeAppointmentId: parseInt(appointmentId, 10)
+                }
+            );
+
+            if (!bookingValidation.valid) {
+                return res.status(400).json({ error: bookingValidation.error });
+            }
+
+            nextStartAt = nextStartIso;
+            nextEndAt = nextEndIso;
+            nextServiceId = parsedServiceId;
+        }
+
+        const updates = [];
+        const params = [];
+        let paramIndex = 1;
+
+        if (hasScheduleChange) {
+            updates.push(`start_at = $${paramIndex++}`);
+            params.push(nextStartAt);
+            updates.push(`end_at = $${paramIndex++}`);
+            params.push(nextEndAt);
+            updates.push(`service_id = $${paramIndex++}`);
+            params.push(nextServiceId);
+        }
+
+        if (status !== undefined) {
+            updates.push(`status = $${paramIndex++}`);
+            params.push(status);
         }
 
         if (notes !== undefined) {
+            updates.push(`notes = $${paramIndex++}`);
+            params.push(notes);
+        }
+
+        if (updates.length > 0) {
+            params.push(appointmentId);
             await db.execute(`
-                UPDATE appointments SET notes = $1, updated_at = NOW() WHERE id = $2
-            `, [notes, appointmentId]);
+                UPDATE appointments
+                SET ${updates.join(', ')}, updated_at = NOW()
+                WHERE id = $${paramIndex}
+            `, params);
         }
 
         const newAppointment = await db.queryOne('SELECT * FROM appointments WHERE id = $1', [appointmentId]);
@@ -853,7 +1002,7 @@ app.get('/api/admin/patients', requireAdmin, async (req, res) => {
             params.push(`%${search}%`);
         }
 
-        query += ' ORDER BY p.created_at DESC LIMIT 100';
+        query += ' ORDER BY last_visit DESC NULLS LAST, p.created_at DESC LIMIT 100';
 
         const patients = await db.queryAll(query, params);
         res.json(patients);
@@ -972,6 +1121,7 @@ app.put('/api/admin/settings/smtp', requireAdmin, async (req, res) => {
 
         await logAudit(req.session.adminId, 'update_smtp_settings', 'settings', null, null, { smtpHost, smtpPort, smtpUser }, req);
 
+        invalidateSettingsCache();
         res.json({ success: true, message: 'SMTP設定を保存しました' });
 
     } catch (error) {
@@ -1118,7 +1268,7 @@ app.put('/api/admin/slot-capacities/bulk', requireAdmin, async (req, res) => {
 });
 
 // 個別キャパシティ設定
-app.put('/api/admin/slot-capacities/:dayOfWeek/:timeSlot', requireAdmin, async (req, res) => {
+app.put('/api/admin/slot-capacities/:dayOfWeek(\\d+)/:timeSlot', requireAdmin, async (req, res) => {
     try {
         const { dayOfWeek, timeSlot } = req.params;
         const { capacity } = req.body;
@@ -1240,12 +1390,18 @@ app.put('/api/admin/slot-capacities/date/:date', requireAdmin, async (req, res) 
                     `, [date, item.timeSlot]);
                 } else {
                     // 特定日設定追加/更新
-                    await client.query(`
-                        INSERT INTO slot_capacities (specific_date, time_slot, capacity, updated_at)
-                        VALUES ($1, $2, $3, NOW())
-                        ON CONFLICT (specific_date, time_slot) 
-                        DO UPDATE SET capacity = $3, updated_at = NOW()
+                    const updated = await client.query(`
+                        UPDATE slot_capacities
+                        SET capacity = $3, updated_at = NOW()
+                        WHERE specific_date = $1 AND time_slot = $2
                     `, [date, item.timeSlot, item.capacity]);
+
+                    if (updated.rowCount === 0) {
+                        await client.query(`
+                            INSERT INTO slot_capacities (specific_date, time_slot, capacity, updated_at)
+                            VALUES ($1, $2, $3, NOW())
+                        `, [date, item.timeSlot, item.capacity]);
+                    }
                 }
             }
         });
@@ -1272,6 +1428,96 @@ app.get('/api/admin/services', requireAdmin, async (req, res) => {
     } catch (error) {
         console.error('サービス取得エラー:', error);
         res.status(500).json({ error: 'サービスの取得に失敗しました' });
+    }
+});
+
+// サービス追加
+app.post('/api/admin/services', requireAdmin, async (req, res) => {
+    try {
+        const { name, durationMinutes, description } = req.body;
+        const parsedDuration = parseInt(durationMinutes, 10);
+
+        if (!name || !name.trim()) {
+            return res.status(400).json({ error: 'メニュー名を入力してください' });
+        }
+        if (!parsedDuration || parsedDuration < 1) {
+            return res.status(400).json({ error: '施術時間は1分以上で入力してください' });
+        }
+
+        const serviceId = await db.insert(`
+            INSERT INTO services (name, description, duration_minutes, sort_order)
+            VALUES (
+                $1,
+                $2,
+                $3,
+                COALESCE((SELECT MAX(sort_order) + 1 FROM services), 0)
+            )
+        `, [
+            security.sanitize(name),
+            description ? security.sanitize(description) : null,
+            parsedDuration
+        ]);
+
+        await logAudit(req.session.adminId, 'create_service', 'service', serviceId, null, {
+            name,
+            durationMinutes: parsedDuration
+        }, req);
+
+        res.status(201).json({ success: true, message: 'メニューを登録しました', id: serviceId });
+    } catch (error) {
+        console.error('サービス登録エラー:', error);
+        res.status(500).json({ error: 'メニューの登録に失敗しました' });
+    }
+});
+
+// サービス削除（論理削除）
+app.delete('/api/admin/services/:id', requireAdmin, async (req, res) => {
+    try {
+        const serviceId = req.params.id;
+
+        const service = await db.queryOne('SELECT * FROM services WHERE id = $1', [serviceId]);
+        if (!service) {
+            return res.status(404).json({ error: 'メニューが見つかりません' });
+        }
+
+        await db.execute(`
+            UPDATE services SET is_active = false, updated_at = NOW()
+            WHERE id = $1
+        `, [serviceId]);
+
+        await logAudit(req.session.adminId, 'delete_service', 'service', serviceId, service, null, req);
+
+        res.json({ success: true, message: 'メニューを削除しました' });
+    } catch (error) {
+        console.error('サービス削除エラー:', error);
+        res.status(500).json({ error: 'メニューの削除に失敗しました' });
+    }
+});
+
+// サービス並び替え
+app.put('/api/admin/services/reorder', requireAdmin, async (req, res) => {
+    try {
+        const { ids } = req.body;
+
+        if (!Array.isArray(ids)) {
+            return res.status(400).json({ error: 'データ形式が正しくありません' });
+        }
+
+        await db.transaction(async (client) => {
+            for (let i = 0; i < ids.length; i++) {
+                await client.query(`
+                    UPDATE services SET sort_order = $1, updated_at = NOW()
+                    WHERE id = $2
+                `, [i, ids[i]]);
+            }
+        });
+
+        await logAudit(req.session.adminId, 'reorder_service', 'service', null, null, { ids }, req);
+
+        res.json({ success: true, message: '順序を保存しました' });
+    } catch (error) {
+        console.error('サービス並び替えエラー:', error);
+        res.status(500).json({ error: '並び替えの保存に失敗しました' });
     }
 });
 
@@ -1458,6 +1704,8 @@ app.put('/api/admin/business-hours/:dayOfWeek', requireAdmin, async (req, res) =
     try {
         const dayOfWeek = parseInt(req.params.dayOfWeek);
         const { isClosed, morningOpen, morningClose, afternoonOpen, afternoonClose } = req.body;
+        const derivedOpenTime = morningOpen || afternoonOpen || null;
+        const derivedCloseTime = afternoonClose || morningClose || null;
 
         if (dayOfWeek < 0 || dayOfWeek > 6) {
             return res.status(400).json({ error: '無効な曜日です' });
@@ -1468,7 +1716,8 @@ app.put('/api/admin/business-hours/:dayOfWeek', requireAdmin, async (req, res) =
         if (isClosed) {
             await db.execute(`
                 UPDATE business_hours 
-                SET is_closed = true, morning_open = NULL, morning_close = NULL, 
+                SET is_closed = true, open_time = NULL, close_time = NULL,
+                    morning_open = NULL, morning_close = NULL, 
                     afternoon_open = NULL, afternoon_close = NULL
                 WHERE day_of_week = $1
             `, [dayOfWeek]);
@@ -1476,10 +1725,12 @@ app.put('/api/admin/business-hours/:dayOfWeek', requireAdmin, async (req, res) =
             await db.execute(`
                 UPDATE business_hours 
                 SET is_closed = false, 
-                    morning_open = $1, morning_close = $2,
-                    afternoon_open = $3, afternoon_close = $4
-                WHERE day_of_week = $5
+                    open_time = $1, close_time = $2,
+                    morning_open = $3, morning_close = $4,
+                    afternoon_open = $5, afternoon_close = $6
+                WHERE day_of_week = $7
             `, [
+                derivedOpenTime, derivedCloseTime,
                 morningOpen || null, morningClose || null,
                 afternoonOpen || null, afternoonClose || null,
                 dayOfWeek
@@ -1529,6 +1780,7 @@ app.put('/api/admin/settings/booking', requireAdmin, async (req, res) => {
 
         await logAudit(req.session.adminId, 'update_booking_settings', 'settings', null, null, { cutoffDays, cutoffHours, maxDaysAhead }, req);
 
+        invalidateSettingsCache();
         res.json({ success: true, message: '予約設定を保存しました' });
     } catch (error) {
         console.error('予約設定保存エラー:', error);
@@ -1558,6 +1810,33 @@ app.delete('/api/admin/debug/patients', requireAdmin, async (req, res) => {
     } catch (error) {
         console.error('全患者削除エラー:', error);
         res.status(500).json({ error: '削除に失敗しました: ' + error.message });
+    }
+});
+
+// 休診日一覧取得
+app.get('/api/admin/holidays', requireAdmin, async (req, res) => {
+    try {
+        const { start, end } = req.query;
+
+        let query = 'SELECT * FROM holidays WHERE 1=1';
+        const params = [];
+
+        if (start) {
+            params.push(start);
+            query += ` AND date >= $${params.length}`;
+        }
+        if (end) {
+            params.push(end);
+            query += ` AND date <= $${params.length}`;
+        }
+
+        query += ' ORDER BY date ASC';
+
+        const holidays = await db.queryAll(query, params);
+        res.json(holidays);
+    } catch (error) {
+        console.error('休診日取得エラー:', error);
+        res.status(500).json({ error: '休診日の取得に失敗しました' });
     }
 });
 
@@ -1602,7 +1881,7 @@ app.get('/api/admin/schedule-exceptions', requireAdmin, async (req, res) => {
 });
 
 // スケジュール例外詳細取得
-app.get('/api/admin/schedule-exceptions/:id', requireAdmin, async (req, res) => {
+app.get('/api/admin/schedule-exceptions/:id(\\d+)', requireAdmin, async (req, res) => {
     try {
         const exception = await db.queryOne(`
             SELECT se.*, a.display_name as created_by_name
@@ -1698,7 +1977,7 @@ app.post('/api/admin/schedule-exceptions', requireAdmin, async (req, res) => {
 });
 
 // スケジュール例外更新
-app.put('/api/admin/schedule-exceptions/:id', requireAdmin, async (req, res) => {
+app.put('/api/admin/schedule-exceptions/:id(\\d+)', requireAdmin, async (req, res) => {
     try {
         const exceptionId = req.params.id;
         const {
@@ -1770,7 +2049,7 @@ app.put('/api/admin/schedule-exceptions/:id', requireAdmin, async (req, res) => 
 });
 
 // スケジュール例外削除
-app.delete('/api/admin/schedule-exceptions/:id', requireAdmin, async (req, res) => {
+app.delete('/api/admin/schedule-exceptions/:id(\\d+)', requireAdmin, async (req, res) => {
     try {
         const exceptionId = req.params.id;
 
