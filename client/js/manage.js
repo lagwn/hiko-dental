@@ -1034,13 +1034,19 @@ async function loadAppointmentTimeOptions(appointmentId, preferredTime = '') {
         if (requestId !== state.editSlotsRequestId) {
             return;
         }
-        const slots = (result.slots || []).filter(slot => slot.available);
+        const slots = result.slots || [];
 
         timeSelect.innerHTML = '';
         timeSelect.disabled = false;
 
+        // 管理者は満席スロットも選択可能（全スロット表示）
         slots.forEach(slot => {
-            timeSelect.innerHTML += `<option value="${slot.time}">${slot.time}</option>`;
+            const label = slot.available ? slot.time : `${slot.time}（満席）`;
+            const opt = document.createElement('option');
+            opt.value = slot.time;
+            opt.textContent = label;
+            if (!slot.available) opt.style.color = '#999';
+            timeSelect.appendChild(opt);
         });
 
         if (isOriginalSlotSelection && originalTimeStr && !timeSelect.querySelector(`option[value="${originalTimeStr}"]`)) {
@@ -2557,19 +2563,15 @@ async function updateAvailableTimes(options = {}) {
             return;
         }
 
-        let hasAvailable = false;
+        // 管理者は満席スロットも選択可能（全スロット表示）
         slots.forEach(slot => {
-            if (slot.available) {
-                // そのまま追加
-                timeSelect.innerHTML += `<option value="${slot.time}">${slot.time}</option>`;
-                hasAvailable = true;
-            }
+            const label = slot.available ? slot.time : `${slot.time}（満席）`;
+            const opt = document.createElement('option');
+            opt.value = slot.time;
+            opt.textContent = label;
+            if (!slot.available) opt.style.color = '#999';
+            timeSelect.appendChild(opt);
         });
-
-        if (!hasAvailable) {
-            timeSelect.innerHTML = '<option value="">空き枠なし</option>';
-            return;
-        }
 
         selectNearestTime(timeSelect, preferredTime);
 
