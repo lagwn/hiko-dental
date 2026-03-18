@@ -239,7 +239,7 @@ app.get('/api/admin/slots', requireAdmin, async (req, res) => {
 // 予約作成（トランザクション＋排他ロック付き）
 app.post('/api/appointments', bookingLimiter, async (req, res) => {
     try {
-        const { serviceId, staffId, startAt, endAt, name, kana, phone, email, address } = req.body;
+        const { serviceId, staffId, startAt, endAt, name, kana, phone, email, address, chiefComplaint } = req.body;
 
         // 入力バリデーション
         const validation = security.validateAppointmentData({
@@ -363,9 +363,10 @@ app.post('/api/appointments', bookingLimiter, async (req, res) => {
             const tokenExpiry = security.calculateTokenExpiry();
 
             // 予約作成
+            const sanitizedComplaint = chiefComplaint ? security.sanitize(chiefComplaint) : null;
             const appointmentRes = await client.query(`
-                INSERT INTO appointments (patient_id, service_id, staff_id, start_at, end_at, access_token_hash, token_expires_at)
-                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                INSERT INTO appointments (patient_id, service_id, staff_id, start_at, end_at, access_token_hash, token_expires_at, notes)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                 RETURNING id
             `, [
                 patient.id,
@@ -374,7 +375,8 @@ app.post('/api/appointments', bookingLimiter, async (req, res) => {
                 startAt,
                 endAt,
                 tokenHash,
-                tokenExpiry.toISOString()
+                tokenExpiry.toISOString(),
+                sanitizedComplaint
             ]);
 
             const appointmentId = appointmentRes.rows[0].id;

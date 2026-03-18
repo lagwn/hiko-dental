@@ -326,7 +326,13 @@ async function sendAdminNotificationEmail(db, appointment, patient, service, sta
 【メール】${patient.email || '未登録'}
 【住所】${patient.address || '未登録'}
 
+${appointment.notes ? `━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+■ お困りごと・ご要望
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+${appointment.notes}
+
+` : ''}━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 管理画面で詳細をご確認ください。
 ${process.env.BASE_URL || 'http://localhost:3000'}/manage.html

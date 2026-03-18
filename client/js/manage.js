@@ -964,7 +964,7 @@ async function showAppointmentDetail(id) {
                 </div>
             </div>
             <div class="confirm-section">
-                <div class="confirm-title">メモ</div>
+                <div class="confirm-title">お困りごと・メモ</div>
                 <div class="confirm-value">
                     <textarea id="aptNotes" class="form-input" style="min-height: 80px;">${escapeHtml(apt.notes || '')}</textarea>
                 </div>

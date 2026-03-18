@@ -418,7 +418,8 @@ function collectFormData() {
         kana: document.getElementById('kana').value.trim(),
         phone: document.getElementById('phone').value.trim(),
         email: document.getElementById('email').value.trim(),
-        address: document.getElementById('address').value.trim()
+        address: document.getElementById('address').value.trim(),
+        chiefComplaint: document.getElementById('chiefComplaint').value.trim()
     };
 }
 
@@ -439,6 +440,13 @@ function showConfirmation() {
         document.getElementById('confirmEmailSection').style.display = 'block';
     } else {
         document.getElementById('confirmEmailSection').style.display = 'none';
+    }
+
+    if (state.customerInfo.chiefComplaint) {
+        document.getElementById('confirmComplaint').textContent = state.customerInfo.chiefComplaint;
+        document.getElementById('confirmComplaintSection').style.display = 'block';
+    } else {
+        document.getElementById('confirmComplaintSection').style.display = 'none';
     }
 }
 
@@ -465,7 +473,8 @@ async function submitBooking() {
             kana: state.customerInfo.kana,
             phone: state.customerInfo.phone,
             email: state.customerInfo.email || null,
-            address: state.customerInfo.address || null
+            address: state.customerInfo.address || null,
+            chiefComplaint: state.customerInfo.chiefComplaint || null
         };
 
         const result = await api('/api/appointments', {

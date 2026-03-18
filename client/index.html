@@ -166,6 +166,11 @@
                                     <label class="form-label" for="address">住所</label>
                                     <input type="text" class="form-input" id="address" name="address" placeholder="東京都○○区△△1-2-3">
                                 </div>
+                                <div class="form-group">
+                                    <label class="form-label" for="chiefComplaint">お困りごと・ご要望</label>
+                                    <textarea class="form-input" id="chiefComplaint" name="chiefComplaint" rows="3" placeholder="例：右上の奥歯が痛い、歯のクリーニングをしたいなど" style="resize: vertical;"></textarea>
+                                    <p class="form-hint">任意：ご来院前に担当者が確認します</p>
+                                </div>
                             </form>
                         </div>
                     </div>
@@ -206,6 +211,10 @@
                             <div class="confirm-section" id="confirmEmailSection" style="display: none;">
                                 <div class="confirm-title">メールアドレス</div>
                                 <div class="confirm-value" id="confirmEmail"></div>
+                            </div>
+                            <div class="confirm-section" id="confirmComplaintSection" style="display: none;">
+                                <div class="confirm-title">お困りごと・ご要望</div>
+                                <div class="confirm-value" id="confirmComplaint" style="white-space: pre-wrap;"></div>
                             </div>
                         </div>
                     </div>
