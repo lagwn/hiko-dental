@@ -600,8 +600,8 @@ app.get('/api/admin/appointments', requireAdmin, async (req, res) => {
         const { start, end, status } = req.query;
 
         let query = `
-            SELECT 
-                a.id, a.start_at, a.end_at, a.status, a.notes, a.created_at,
+            SELECT
+                a.id, a.service_id, a.start_at, a.end_at, a.status, a.notes, a.created_at,
                 s.name as service_name, s.duration_minutes,
                 st.name as staff_name,
                 p.id as patient_id, p.name as patient_name, p.kana as patient_kana, p.phone as patient_phone

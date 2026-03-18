@@ -106,6 +106,86 @@
             color: var(--muted);
         }
 
+        .patient-lookup {
+            position: relative;
+        }
+
+        .patient-suggestion-list {
+            position: absolute;
+            top: calc(100% + 4px);
+            left: 0;
+            right: 0;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            box-shadow: var(--shadow-lg);
+            max-height: 240px;
+            overflow-y: auto;
+            z-index: 20;
+        }
+
+        .patient-suggestion-item {
+            width: 100%;
+            border: none;
+            border-bottom: 1px solid var(--border);
+            background: transparent;
+            padding: 12px 14px;
+            text-align: left;
+            cursor: pointer;
+        }
+
+        .patient-suggestion-item:last-child {
+            border-bottom: none;
+        }
+
+        .patient-suggestion-item:hover {
+            background: var(--surface);
+        }
+
+        .patient-suggestion-name {
+            font-weight: 600;
+            color: var(--text);
+        }
+
+        .patient-suggestion-meta {
+            margin-top: 4px;
+            font-size: 0.75rem;
+            color: var(--muted);
+        }
+
+        .patient-suggestion-empty {
+            padding: 12px 14px;
+            font-size: 0.875rem;
+            color: var(--muted);
+        }
+
+        .patient-selection-status {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: var(--spacing-sm);
+            margin-top: var(--spacing-sm);
+            padding: 10px 12px;
+            border-radius: var(--radius);
+            border: 1px solid rgba(62, 92, 90, 0.2);
+            background: rgba(62, 92, 90, 0.08);
+        }
+
+        .patient-selection-text {
+            font-size: 0.875rem;
+            color: var(--text);
+        }
+
+        .patient-selection-action {
+            border: none;
+            background: transparent;
+            color: var(--accent-dark);
+            font-size: 0.8125rem;
+            font-weight: 600;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+
         .detail-panel {
             background: var(--bg);
             border: 1px solid var(--border);
@@ -164,7 +244,7 @@
 
         .calendar-week {
             display: grid;
-            grid-template-columns: 60px repeat(7, 1fr);
+            grid-template-columns: 72px repeat(7, 1fr);
             border: 1px solid var(--border);
             border-radius: var(--radius);
             overflow: hidden;
@@ -179,6 +259,11 @@
             border-bottom: 1px solid var(--border);
         }
 
+        .calendar-week-header.day-closed {
+            background: rgba(99, 115, 129, 0.14);
+            color: var(--muted);
+        }
+
         .calendar-week-header.time-col {
             background: var(--bg);
         }
@@ -186,41 +271,94 @@
         .time-slot {
             border-right: 1px solid var(--border);
             border-bottom: 1px solid var(--border);
-            min-height: 40px;
+            min-height: 56px;
             font-size: 0.75rem;
-            padding: var(--spacing-xs);
+            padding: 4px 2px;
             position: relative;
+            overflow: hidden;
+            cursor: pointer;
+            transition: background-color 0.2s ease;
+        }
+
+        .time-slot[data-selectable="true"]:hover {
+            background: rgba(195, 138, 76, 0.08);
+        }
+
+        .time-slot.time-slot-unavailable {
+            cursor: default;
+        }
+
+        .time-slot.time-slot-outside-hours {
+            background: rgba(99, 115, 129, 0.08);
+        }
+
+        .time-slot.time-slot-closed-day,
+        .time-slot.time-slot-closed-period {
+            background: rgba(99, 115, 129, 0.14);
         }
 
         .time-label {
             padding: var(--spacing-xs) var(--spacing-sm);
             text-align: right;
-            font-size: 0.75rem;
+            font-size: 0.78rem;
             color: var(--muted);
             border-right: 1px solid var(--border);
             border-bottom: 1px solid var(--border);
+            min-height: 56px;
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            white-space: nowrap;
         }
 
         .appointment-block {
             position: absolute;
             left: 2px;
             right: 2px;
-            background: var(--accent);
             color: white;
-            padding: 4px 6px;
+            padding: 2px 6px;
             border-radius: 4px;
-            font-size: 0.7rem;
+            font-size: 0.72rem;
+            min-height: 20px;
             overflow: hidden;
             cursor: pointer;
             z-index: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-start;
+            box-sizing: border-box;
         }
 
         .appointment-block:hover {
-            opacity: 0.9;
+            opacity: 0.85;
         }
 
         .appointment-block.cancelled {
-            background: var(--muted);
+            background: var(--muted) !important;
+        }
+
+        .apt-time {
+            font-size: 0.68rem;
+            opacity: 0.92;
+            line-height: 1.3;
+            white-space: nowrap;
+        }
+
+        .apt-patient {
+            font-weight: 600;
+            line-height: 1.3;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .apt-service {
+            font-size: 0.65rem;
+            opacity: 0.88;
+            line-height: 1.2;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
 
         .week-nav {
@@ -233,6 +371,12 @@
         .week-nav-title {
             font-size: 1.125rem;
             font-weight: 600;
+        }
+
+        .calendar-hint {
+            margin-bottom: var(--spacing-md);
+            font-size: 0.875rem;
+            color: var(--muted);
         }
 
         .week-nav-buttons {
@@ -253,9 +397,17 @@
             }
 
             .calendar-week-header,
-            .time-slot,
             .time-label {
                 padding: var(--spacing-xs);
+            }
+
+            .time-slot {
+                min-height: 52px;
+                padding: 4px 2px;
+            }
+
+            .time-label {
+                min-height: 52px;
             }
         }
 
@@ -352,6 +504,7 @@
                             <span class="week-nav-title" id="weekTitle"></span>
                             <button class="btn btn-primary" id="newAppointmentBtn">＋ 新規予約</button>
                         </div>
+                        <p class="calendar-hint">空き枠をクリックすると、その日時を入れた状態で新規予約を開けます。</p>
                         <div class="calendar-week" id="calendarGrid">
                             <!-- カレンダーがここに描画される -->
                         </div>
@@ -987,7 +1140,20 @@
                     <form id="createAppointmentForm">
                         <div class="form-group">
                             <label class="form-label">患者名 <span class="required">*</span></label>
-                            <input type="text" class="form-input" id="newAptName" required placeholder="例: 山田 一郎">
+                            <div class="patient-lookup" id="newAptPatientLookup">
+                                <input type="hidden" id="newAptPatientId">
+                                <input type="text" class="form-input" id="newAptName" required autocomplete="off"
+                                    placeholder="例: 山田 一郎">
+                                <div class="patient-suggestion-list" id="newAptPatientSuggestions" style="display: none;">
+                                </div>
+                            </div>
+                            <div class="patient-selection-status" id="newAptPatientSelection" style="display: none;">
+                                <div class="patient-selection-text" id="newAptPatientSelectionText"></div>
+                                <button type="button" class="patient-selection-action" id="clearNewAptPatient">
+                                    新規患者に戻す
+                                </button>
+                            </div>
+                            <p class="form-hint">以前登録した患者は候補から選べます</p>
                         </div>
                         <div class="form-group">
                             <label class="form-label">予約日 <span class="required">*</span></label>

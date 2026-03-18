@@ -803,13 +803,32 @@ function renderCalendar(startOfWeek, appointments, calendarMeta = {}) {
                 positionedAppointments.forEach((item) => {
                     const { apt, startAt, minute, top, lane } = item;
                     const startTime = `${String(startAt.getHours()).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+                    const endAt = new Date(apt.end_at);
+                    const endTime = `${String(endAt.getHours()).padStart(2, '0')}:${String(endAt.getMinutes()).padStart(2, '0')}`;
+
+                    const durationMinutes = apt.duration_minutes || SLOT_MINUTES;
+                    const blockHeight = Math.max(20, Math.round(durationMinutes / SLOT_MINUTES * SLOT_HEIGHT_PX) - 4);
+                    const serviceColor = getServiceColor(apt.service_id);
+
                     const widthPct = 100 / laneCount;
                     const leftPct = lane * widthPct;
-                    const positionStyle = `top:${top}px;left:calc(${leftPct}% + 2px);width:calc(${widthPct}% - 4px);right:auto;`;
+                    const bgStyle = apt.status !== 'cancelled' ? `background:${serviceColor};` : '';
+                    const positionStyle = `top:${top}px;left:calc(${leftPct}% + 2px);width:calc(${widthPct}% - 4px);right:auto;height:${blockHeight}px;${bgStyle}`;
+
+                    const patientName = escapeHtml(apt.patient_name || apt.name || '名称未設定');
+                    const serviceName = escapeHtml(apt.service_name || '');
+                    const titleAttr = `${startTime}〜${endTime} ${patientName}${serviceName ? `（${serviceName}）` : ''}`;
+
+                    let blockContent;
+                    if (blockHeight >= 48) {
+                        blockContent = `<div class="apt-time">${startTime}〜${endTime}</div><div class="apt-patient">${patientName}</div>${serviceName ? `<div class="apt-service">${serviceName}</div>` : ''}`;
+                    } else {
+                        blockContent = `<div class="apt-patient">${startTime}〜${endTime} ${patientName}</div>`;
+                    }
 
                     html += `
-                        <div class="appointment-block ${apt.status}" data-id="${apt.id}" style="${positionStyle}" title="${startTime} ${escapeHtml(apt.patient_name || apt.name || '名称未設定')}">
-                            ${startTime} ${escapeHtml(apt.patient_name || apt.name || '名称未設定')}
+                        <div class="appointment-block ${apt.status}" data-id="${apt.id}" style="${positionStyle}" title="${escapeHtml(titleAttr)}">
+                            ${blockContent}
                         </div>
                     `;
                 });
@@ -1292,6 +1311,25 @@ async function addNote(patientId) {
 }
 
 // ===== ユーティリティ =====
+
+// サービスIDに対応するカラーパレット
+const SERVICE_COLOR_PALETTE = [
+    '#B5843A', // amber（デフォルト）
+    '#2980B9', // blue
+    '#8E44AD', // purple
+    '#E67E22', // orange
+    '#C0392B', // red
+    '#27AE60', // green
+    '#16A085', // teal
+    '#D35400', // burnt orange
+    '#6C5CE7', // violet
+    '#2C3E50', // dark slate
+];
+
+function getServiceColor(serviceId) {
+    if (!serviceId) return SERVICE_COLOR_PALETTE[0];
+    return SERVICE_COLOR_PALETTE[(serviceId - 1) % SERVICE_COLOR_PALETTE.length];
+}
 
 /**
  * preferredTime（HH:MM）に最も近い（以降の）選択肢を選ぶ。
