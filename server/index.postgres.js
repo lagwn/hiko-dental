@@ -757,6 +757,41 @@ app.post('/api/admin/appointments', requireAdmin, async (req, res) => {
     }
 });
 
+// 新着予約の最大IDを取得（ポーリング初期化用）
+app.get('/api/admin/appointments/latest-id', requireAdmin, async (req, res) => {
+    try {
+        const row = await db.queryOne(`SELECT COALESCE(MAX(id), 0) AS max_id FROM appointments WHERE status = 'confirmed'`);
+        res.json({ maxId: row.max_id });
+    } catch (error) {
+        console.error('最大ID取得エラー:', error);
+        res.status(500).json({ error: '取得に失敗しました' });
+    }
+});
+
+// 新着予約チェック（ポーリング用・ID基準）
+app.get('/api/admin/appointments/recent', requireAdmin, async (req, res) => {
+    try {
+        const afterId = parseInt(req.query.after_id) || 0;
+
+        const appointments = await db.queryAll(`
+            SELECT
+                a.id, a.start_at, a.end_at, a.created_at,
+                s.name as service_name,
+                p.name as patient_name
+            FROM appointments a
+            JOIN services s ON a.service_id = s.id
+            JOIN patients p ON a.patient_id = p.id
+            WHERE a.id > $1 AND a.status = 'confirmed'
+            ORDER BY a.id ASC
+        `, [afterId]);
+
+        res.json(appointments);
+    } catch (error) {
+        console.error('新着予約チェックエラー:', error);
+        res.status(500).json({ error: '取得に失敗しました' });
+    }
+});
+
 // 予約詳細
 app.get('/api/admin/appointments/:id', requireAdmin, async (req, res) => {
     try {
@@ -2148,41 +2183,6 @@ app.get('/api/health', async (req, res) => {
             message: 'データベース接続エラー',
             timestamp: new Date().toISOString()
         });
-    }
-});
-
-// 現在の最大予約ID取得（ポーリング初期化用）
-app.get('/api/admin/appointments/latest-id', requireAdmin, async (req, res) => {
-    try {
-        const row = await db.queryOne(`SELECT COALESCE(MAX(id), 0) AS max_id FROM appointments WHERE status = 'confirmed'`);
-        res.json({ maxId: row.max_id });
-    } catch (error) {
-        console.error('最大ID取得エラー:', error);
-        res.status(500).json({ error: '取得に失敗しました' });
-    }
-});
-
-// 新着予約チェック（ポーリング用・ID基準）
-app.get('/api/admin/appointments/recent', requireAdmin, async (req, res) => {
-    try {
-        const afterId = parseInt(req.query.after_id) || 0;
-
-        const appointments = await db.queryAll(`
-            SELECT
-                a.id, a.start_at, a.end_at, a.created_at,
-                s.name as service_name,
-                p.name as patient_name
-            FROM appointments a
-            JOIN services s ON a.service_id = s.id
-            JOIN patients p ON a.patient_id = p.id
-            WHERE a.id > $1 AND a.status = 'confirmed'
-            ORDER BY a.id ASC
-        `, [afterId]);
-
-        res.json(appointments);
-    } catch (error) {
-        console.error('新着予約チェックエラー:', error);
-        res.status(500).json({ error: '取得に失敗しました' });
     }
 });
 
