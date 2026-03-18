@@ -1737,15 +1737,18 @@ async function deleteDoctor(id) {
         '医師の削除',
         'この医師を削除してもよろしいですか？',
         '削除する',
-        'btn-primary' // 必要に応じて btn-error などのスタイルを当てられるように
+        'btn-primary'
     );
 
     if (!confirmed) return;
 
+    const row = document.querySelector(`#doctorsTable tr[data-id="${id}"]`);
+    if (row) row.remove();
+
     try {
         await api(`/api/admin/staff/${id}`, { method: 'DELETE' });
-        loadDoctors();
     } catch (error) {
+        loadDoctors();
         alert(error.message);
     }
 }
@@ -1884,10 +1887,13 @@ async function deleteAccount(id) {
 
     if (!confirmed) return;
 
+    const row = document.querySelector(`#accountsTable .delete-account-btn[data-id="${id}"]`)?.closest('tr');
+    if (row) row.remove();
+
     try {
         await api(`/api/admin/accounts/${id}`, { method: 'DELETE' });
-        loadAccounts();
     } catch (error) {
+        loadAccounts();
         alert(error.message);
     }
 }
@@ -2004,10 +2010,14 @@ async function deleteService(id) {
 
     if (!confirmed) return;
 
+    const row = document.querySelector(`#servicesTable tr[data-id="${id}"]`);
+    if (row) row.remove();
+    state.services = state.services.filter(s => String(s.id) !== String(id));
+
     try {
         await api(`/api/admin/services/${id}`, { method: 'DELETE' });
-        loadServices(true);
     } catch (error) {
+        loadServices(true);
         alert(error.message);
     }
 }
@@ -2324,14 +2334,15 @@ async function deleteScheduleException(id) {
 
     if (!confirmed) return;
 
+    const row = document.querySelector(`#scheduleExceptionsTable .delete-exception-btn[data-id="${id}"]`)?.closest('tr');
+    if (row) row.remove();
+
     try {
         await api(`/api/admin/schedule-exceptions/${id}`, { method: 'DELETE' });
         invalidateScheduleDependentCaches();
-        await Promise.all([
-            loadScheduleExceptions(),
-            loadCalendar()
-        ]);
+        loadCalendar(); // バックグラウンドで更新
     } catch (error) {
+        loadScheduleExceptions();
         alert(error.message);
     }
 }
@@ -2849,8 +2860,12 @@ document.getElementById('saveCapacityMatrix')?.addEventListener('click', async (
             body: JSON.stringify({ capacities })
         });
 
+        // 再取得せずローカル状態を更新して再描画
+        capacitySettings.capacities = capacities
+            .filter(c => c.capacity !== null)
+            .map(c => ({ day_of_week: c.dayOfWeek, time_slot: c.timeSlot, capacity: c.capacity }));
+        renderCapacityMatrix();
         showCapacityAlert('success', 'キャパシティ設定を保存しました');
-        await loadCapacitySettings(); // 再読み込み
     } catch (error) {
         showCapacityAlert('error', error.message);
     }
