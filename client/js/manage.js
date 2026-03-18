@@ -1039,13 +1039,11 @@ async function loadAppointmentTimeOptions(appointmentId, preferredTime = '') {
         timeSelect.innerHTML = '';
         timeSelect.disabled = false;
 
-        // 管理者は満席スロットも選択可能（全スロット表示）
+        // 管理者は全スロット選択可能（満席制限なし）
         slots.forEach(slot => {
-            const label = slot.available ? slot.time : `${slot.time}（満席）`;
             const opt = document.createElement('option');
             opt.value = slot.time;
-            opt.textContent = label;
-            if (!slot.available) opt.style.color = '#999';
+            opt.textContent = slot.time;
             timeSelect.appendChild(opt);
         });
 
@@ -2563,13 +2561,11 @@ async function updateAvailableTimes(options = {}) {
             return;
         }
 
-        // 管理者は満席スロットも選択可能（全スロット表示）
+        // 管理者は全スロット選択可能（満席制限なし）
         slots.forEach(slot => {
-            const label = slot.available ? slot.time : `${slot.time}（満席）`;
             const opt = document.createElement('option');
             opt.value = slot.time;
-            opt.textContent = label;
-            if (!slot.available) opt.style.color = '#999';
+            opt.textContent = slot.time;
             timeSelect.appendChild(opt);
         });
 
