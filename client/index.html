@@ -140,15 +140,45 @@
                 <div class="step-content" id="step4">
                     <div class="card">
                         <div class="card-header">
-                            <h2 class="card-title">お客様情報を入力してください</h2>
-                            <p class="card-description"><span style="color: var(--error);">*</span>は必須項目です</p>
+                            <h2 class="card-title">お客様情報</h2>
                         </div>
                         <div class="card-body">
-                            <div id="savedInfoBanner" style="display:none; background:#f0fdf4; border:1px solid #86efac; border-radius:8px; padding:10px 14px; margin-bottom:16px; font-size:0.875rem; color:#166534; display:none; align-items:center; justify-content:space-between; gap:8px;">
-                                <span>✓ 前回の情報が自動入力されました</span>
-                                <button type="button" id="clearSavedInfo" style="background:none; border:none; color:#166534; text-decoration:underline; cursor:pointer; font-size:0.8rem; white-space:nowrap;">別の方の情報で入力</button>
+
+                            <!-- 初診/再診 選択 -->
+                            <div id="visitTypeSelector">
+                                <p style="font-size:1rem; font-weight:500; margin-bottom:16px; text-align:center;">彦歯科医院へのご来院は初めてですか？</p>
+                                <div style="display:flex; gap:12px;">
+                                    <button type="button" class="visit-type-btn" id="btnReturning">
+                                        <span class="visit-type-icon">🔄</span>
+                                        <span class="visit-type-label">再診<br><small>（2回目以降）</small></span>
+                                    </button>
+                                    <button type="button" class="visit-type-btn" id="btnNew">
+                                        <span class="visit-type-icon">✨</span>
+                                        <span class="visit-type-label">初診<br><small>（初めての方）</small></span>
+                                    </button>
+                                </div>
                             </div>
-                            <form id="customerForm">
+
+                            <!-- 再診：電話番号で照合 -->
+                            <div id="phoneLookupSection" style="display:none;">
+                                <p style="font-size:0.875rem; color:var(--muted); margin-bottom:16px;">ご登録の電話番号を入力してください。お名前などが自動で入力されます。</p>
+                                <div style="display:flex; gap:8px; margin-bottom:12px;">
+                                    <input type="tel" class="form-input" id="phoneLookupInput" placeholder="090-1234-5678" style="flex:1;">
+                                    <button type="button" class="btn btn-primary" id="phoneLookupBtn" style="white-space:nowrap;">自動入力する</button>
+                                </div>
+                                <div id="phoneLookupStatus"></div>
+                                <button type="button" id="switchToNew" style="background:none;border:none;color:var(--muted);font-size:0.8rem;cursor:pointer;text-decoration:underline;margin-top:4px;">初診として入力する</button>
+                            </div>
+
+                            <!-- 自動入力済みバナー -->
+                            <div id="savedInfoBanner" style="display:none; background:#f0fdf4; border:1px solid #86efac; border-radius:8px; padding:10px 14px; margin-bottom:16px; font-size:0.875rem; color:#166534; align-items:center; justify-content:space-between; gap:8px;">
+                                <span>✓ 登録済みの情報が自動入力されました。内容をご確認ください。</span>
+                                <button type="button" id="clearSavedInfo" style="background:none;border:none;color:#166534;text-decoration:underline;cursor:pointer;font-size:0.8rem;white-space:nowrap;">別の方の情報で入力</button>
+                            </div>
+
+                            <!-- 入力フォーム（初診時は最初から表示、再診時は照合後に表示） -->
+                            <form id="customerForm" style="display:none;">
+                                <p class="form-hint" style="margin-bottom:16px;"><span style="color:var(--error);">*</span>は必須項目です</p>
                                 <div class="form-group">
                                     <label class="form-label" for="name">氏名<span class="required">*</span></label>
                                     <input type="text" class="form-input" id="name" name="name" placeholder="山田 太郎" required>
@@ -160,7 +190,6 @@
                                 <div class="form-group">
                                     <label class="form-label" for="phone">電話番号<span class="required">*</span></label>
                                     <input type="tel" class="form-input" id="phone" name="phone" placeholder="090-1234-5678" required>
-                                    <p class="form-hint">📋 2回目以降の方は電話番号を入力すると他の項目が自動で入力されます</p>
                                 </div>
                                 <div class="form-group">
                                     <label class="form-label" for="email">メールアドレス</label>
@@ -177,11 +206,12 @@
                                     <p class="form-hint">任意：ご来院前に担当者が確認します</p>
                                 </div>
                             </form>
+
                         </div>
                     </div>
                     <div class="step-nav">
                         <button class="btn btn-secondary" id="prevStep4">戻る</button>
-                        <button class="btn btn-primary" id="nextStep4">確認画面へ</button>
+                        <button class="btn btn-primary" id="nextStep4" style="display:none;">確認画面へ</button>
                     </div>
                 </div>
 

@@ -50,7 +50,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         ]);
         setupEventListeners();
         renderCalendar();
-        loadPatientInfo(); // 保存済み情報を自動入力
     } catch (error) {
         showError('データの読み込みに失敗しました。ページを再読み込みしてください。');
     }
@@ -340,7 +339,10 @@ function setupEventListeners() {
     document.getElementById('nextStep2').addEventListener('click', () => goToStep(3));
     document.getElementById('prevStep3').addEventListener('click', () => goToStep(2));
     document.getElementById('nextStep3').addEventListener('click', () => goToStep(4));
-    document.getElementById('prevStep4').addEventListener('click', () => goToStep(3));
+    document.getElementById('prevStep4').addEventListener('click', () => {
+        resetVisitTypeSelector(); // 戻る時は選択画面に戻す
+        goToStep(3);
+    });
     document.getElementById('nextStep4').addEventListener('click', () => {
         if (validateForm()) {
             collectFormData();
@@ -351,8 +353,20 @@ function setupEventListeners() {
     document.getElementById('prevStep5').addEventListener('click', () => goToStep(4));
     document.getElementById('submitBooking').addEventListener('click', submitBooking);
 
-    // 電話番号入力後に既存患者情報を照合して自動補完
-    document.getElementById('phone').addEventListener('blur', lookupPatientByPhone);
+    // 初診/再診 選択
+    document.getElementById('btnReturning').addEventListener('click', () => showPhoneLookup());
+    document.getElementById('btnNew').addEventListener('click', () => showNewPatientForm());
+    document.getElementById('switchToNew').addEventListener('click', (e) => {
+        e.preventDefault();
+        showNewPatientForm();
+    });
+    document.getElementById('clearSavedInfo')?.addEventListener('click', clearPatientInfo);
+
+    // 電話番号照合ボタン
+    document.getElementById('phoneLookupBtn').addEventListener('click', () => runPhoneLookup());
+    document.getElementById('phoneLookupInput').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); runPhoneLookup(); }
+    });
 }
 
 // ===== ステップ管理 =====
@@ -376,6 +390,86 @@ function goToStep(step) {
 
     state.currentStep = step;
     window.scrollTo(0, 0);
+}
+
+// ===== 初診/再診 選択UIの制御 =====
+
+function resetVisitTypeSelector() {
+    document.getElementById('visitTypeSelector').style.display = 'block';
+    document.getElementById('phoneLookupSection').style.display = 'none';
+    document.getElementById('customerForm').style.display = 'none';
+    document.getElementById('savedInfoBanner').style.display = 'none';
+    document.getElementById('nextStep4').style.display = 'none';
+    document.getElementById('phoneLookupInput').value = '';
+    document.getElementById('phoneLookupStatus').innerHTML = '';
+    document.querySelectorAll('.visit-type-btn').forEach(b => b.classList.remove('selected'));
+}
+
+function showPhoneLookup() {
+    document.getElementById('btnReturning').classList.add('selected');
+    document.getElementById('visitTypeSelector').style.display = 'none';
+    document.getElementById('phoneLookupSection').style.display = 'block';
+    document.getElementById('phoneLookupInput').focus();
+}
+
+function showNewPatientForm(prefilled = false) {
+    document.getElementById('visitTypeSelector').style.display = 'none';
+    document.getElementById('phoneLookupSection').style.display = 'none';
+    document.getElementById('customerForm').style.display = 'block';
+    document.getElementById('nextStep4').style.display = 'inline-flex';
+    if (!prefilled) {
+        document.getElementById('savedInfoBanner').style.display = 'none';
+    }
+}
+
+async function runPhoneLookup() {
+    const input = document.getElementById('phoneLookupInput');
+    const status = document.getElementById('phoneLookupStatus');
+    const btn = document.getElementById('phoneLookupBtn');
+    const phone = input.value.trim();
+    const cleanPhone = phone.replace(/[-\s]/g, '');
+
+    if (!/^0\d{9,10}$/.test(cleanPhone)) {
+        status.innerHTML = '<p style="color:var(--error);font-size:0.875rem;">正しい電話番号を入力してください（例：090-1234-5678）</p>';
+        return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = '検索中...';
+    status.innerHTML = '';
+
+    try {
+        const result = await api(`/api/patients/lookup?phone=${encodeURIComponent(cleanPhone)}`);
+
+        if (result.found) {
+            // フォームに入力
+            document.getElementById('name').value    = result.name    || '';
+            document.getElementById('kana').value    = result.kana    || '';
+            document.getElementById('phone').value   = cleanPhone;
+            document.getElementById('email').value   = result.email   || '';
+            document.getElementById('address').value = result.address || '';
+
+            // バナー表示してフォームを表示
+            const banner = document.getElementById('savedInfoBanner');
+            banner.style.display = 'flex';
+            showNewPatientForm(true);
+
+            // localStorage にも保存
+            savePatientInfo();
+        } else {
+            status.innerHTML = `
+                <div style="background:#fef9c3;border:1px solid #fde047;border-radius:8px;padding:10px 14px;font-size:0.875rem;color:#713f12;">
+                    ご登録が見つかりませんでした。初診として情報をご入力ください。
+                </div>`;
+            setTimeout(() => showNewPatientForm(), 1500);
+        }
+    } catch (e) {
+        status.innerHTML = '<p style="color:var(--error);font-size:0.875rem;">照合に失敗しました。初診として入力してください。</p>';
+        setTimeout(() => showNewPatientForm(), 1500);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = '自動入力する';
+    }
 }
 
 // ===== フォームバリデーション =====
@@ -645,32 +739,6 @@ function hideError() {
 }
 
 // ===== 電話番号照合による自動補完 =====
-async function lookupPatientByPhone() {
-    const phone = document.getElementById('phone').value.trim();
-    const cleanPhone = phone.replace(/[-\s]/g, '');
-    if (!/^0\d{9,10}$/.test(cleanPhone)) return; // 形式が不完全な場合はスキップ
-
-    try {
-        const result = await api(`/api/patients/lookup?phone=${encodeURIComponent(cleanPhone)}`);
-        if (!result.found) return;
-
-        // 各フィールドを上書き補完
-        if (result.name)    document.getElementById('name').value    = result.name;
-        if (result.kana)    document.getElementById('kana').value    = result.kana;
-        if (result.email)   document.getElementById('email').value   = result.email;
-        if (result.address) document.getElementById('address').value = result.address;
-
-        // 補完バナーを表示
-        const banner = document.getElementById('savedInfoBanner');
-        if (banner) {
-            banner.querySelector('span').textContent = '✓ 登録済みの情報が自動入力されました';
-            banner.style.display = 'flex';
-        }
-    } catch (e) {
-        // 照合失敗は無視（新規患者として手入力してもらう）
-    }
-}
-
 // ===== 患者情報の自動入力（localStorage） =====
 const PATIENT_INFO_KEY = 'hiko_dental_patient';
 
