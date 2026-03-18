@@ -17,6 +17,7 @@ const security = require('./lib/security');
 const slots = require('./lib/slots.postgres');
 const mailer = require('./lib/mailer');
 const db = require('./db/db');
+const { waitUntil } = require('@vercel/functions');
 
 // 設定
 const PORT = process.env.PORT || 3000;
@@ -397,14 +398,7 @@ app.post('/api/appointments', bookingLimiter, async (req, res) => {
             client.release();
         }
 
-        // Vercel Serverlessはres送信後に関数が終了するため、メール送信をawaitしてから返す
-        await Promise.all([
-            mailer.sendConfirmationEmail(db, result.appointment, result.patientData, result.service, result.staffData, result.accessToken, settings)
-                .catch(err => console.error('メール送信エラー:', err)),
-            mailer.sendAdminNotificationEmail(db, result.appointment, result.patientData, result.service, result.staffData, settings)
-                .catch(err => console.error('管理者通知メール送信エラー:', err))
-        ]);
-
+        // レスポンスを先に返してユーザー体験を向上
         res.status(201).json({
             success: true,
             appointmentId: result.appointmentId,
@@ -417,6 +411,14 @@ app.post('/api/appointments', bookingLimiter, async (req, res) => {
                 staff: result.staffData ? result.staffData.name : '指名なし'
             }
         });
+
+        // waitUntil でメール送信をバックグラウンド実行（Vercel関数の終了を延長）
+        waitUntil(Promise.all([
+            mailer.sendConfirmationEmail(db, result.appointment, result.patientData, result.service, result.staffData, result.accessToken, settings)
+                .catch(err => console.error('メール送信エラー:', err)),
+            mailer.sendAdminNotificationEmail(db, result.appointment, result.patientData, result.service, result.staffData, settings)
+                .catch(err => console.error('管理者通知メール送信エラー:', err))
+        ]));
 
     } catch (error) {
         console.error('予約作成エラー:', error);
