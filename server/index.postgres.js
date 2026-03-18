@@ -395,13 +395,13 @@ app.post('/api/appointments', bookingLimiter, async (req, res) => {
             client.release();
         }
 
-        // 確認メール送信（非同期、失敗しても予約は確定）— dbモジュールを渡してログ保存
-        mailer.sendConfirmationEmail(db, result.appointment, result.patientData, result.service, result.staffData, result.accessToken, settings)
-            .catch(err => console.error('メール送信エラー:', err));
-
-        // 管理者への通知メール送信（非同期）— dbモジュールを渡してログ保存
-        mailer.sendAdminNotificationEmail(db, result.appointment, result.patientData, result.service, result.staffData, settings)
-            .catch(err => console.error('管理者通知メール送信エラー:', err));
+        // Vercel Serverlessはres送信後に関数が終了するため、メール送信をawaitしてから返す
+        await Promise.all([
+            mailer.sendConfirmationEmail(db, result.appointment, result.patientData, result.service, result.staffData, result.accessToken, settings)
+                .catch(err => console.error('メール送信エラー:', err)),
+            mailer.sendAdminNotificationEmail(db, result.appointment, result.patientData, result.service, result.staffData, settings)
+                .catch(err => console.error('管理者通知メール送信エラー:', err))
+        ]);
 
         res.status(201).json({
             success: true,
