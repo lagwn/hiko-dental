@@ -239,23 +239,27 @@ async function logEmail(db, appointmentId, recipientEmail, subject, body, status
 }
 
 /**
- * 日本語形式の日付フォーマット
+ * 日本語形式の日付フォーマット（JST固定）
  */
 function formatJapaneseDate(date) {
-    const year = date.getFullYear();
-    const month = date.getMonth() + 1;
-    const day = date.getDate();
+    // サーバーがUTCで動作するため、JST(UTC+9)に変換して表示
+    const jst = new Date(date.getTime() + 9 * 60 * 60 * 1000);
+    const year = jst.getUTCFullYear();
+    const month = jst.getUTCMonth() + 1;
+    const day = jst.getUTCDate();
     const dayNames = ['日', '月', '火', '水', '木', '金', '土'];
-    const dayOfWeek = dayNames[date.getDay()];
+    const dayOfWeek = dayNames[jst.getUTCDay()];
     return `${year}年${month}月${day}日（${dayOfWeek}）`;
 }
 
 /**
- * 日本語形式の時刻フォーマット
+ * 日本語形式の時刻フォーマット（JST固定）
  */
 function formatJapaneseTime(date) {
-    const hours = date.getHours().toString().padStart(2, '0');
-    const minutes = date.getMinutes().toString().padStart(2, '0');
+    // サーバーがUTCで動作するため、JST(UTC+9)に変換して表示
+    const jst = new Date(date.getTime() + 9 * 60 * 60 * 1000);
+    const hours = jst.getUTCHours().toString().padStart(2, '0');
+    const minutes = jst.getUTCMinutes().toString().padStart(2, '0');
     return `${hours}:${minutes}`;
 }
 
