@@ -2882,6 +2882,11 @@ function renderDateCapacityGrid(capacities) {
     const container = document.getElementById('dateCapacityGrid');
     container.innerHTML = '';
 
+    // 特定日設定が1件でもあれば削除ボタンを表示
+    const hasDateSpecific = capacities.some(item => item.source === 'date');
+    const deleteBtn = document.getElementById('deleteDateCapacity');
+    if (deleteBtn) deleteBtn.style.display = hasDateSpecific ? '' : 'none';
+
     capacities.forEach(item => {
         const isDateSpecific = item.source === 'date';
         const isDaySpecific = item.source === 'day';
@@ -2934,6 +2939,20 @@ document.getElementById('saveDateCapacity')?.addEventListener('click', async () 
 
         showCapacityAlert('success', `${date} の設定を保存しました`);
         await loadDateCapacity(date); // 再描画して色を更新
+    } catch (error) {
+        showCapacityAlert('error', error.message);
+    }
+});
+
+document.getElementById('deleteDateCapacity')?.addEventListener('click', async () => {
+    const date = document.getElementById('capacityDateInput').value;
+    if (!date) return;
+    if (!confirm(`${date} の個別設定を削除して曜日設定に戻しますか？`)) return;
+
+    try {
+        await api(`/api/admin/slot-capacities/date/${date}`, { method: 'DELETE' });
+        showCapacityAlert('success', `${date} の個別設定を削除しました`);
+        await loadDateCapacity(date);
     } catch (error) {
         showCapacityAlert('error', error.message);
     }

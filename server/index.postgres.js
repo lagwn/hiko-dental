@@ -1416,6 +1416,19 @@ app.put('/api/admin/slot-capacities/date/:date', requireAdmin, async (req, res) 
     }
 });
 
+// 特定日付のキャパシティ設定削除（曜日設定に戻す）
+app.delete('/api/admin/slot-capacities/date/:date', requireAdmin, async (req, res) => {
+    try {
+        const { date } = req.params;
+        await db.execute(`DELETE FROM slot_capacities WHERE specific_date = $1`, [date]);
+        await logAudit(req.session.adminId, 'delete_date_capacity', 'slot_capacities', null, null, { date }, req);
+        res.json({ success: true, message: `${date} の個別設定を削除しました` });
+    } catch (error) {
+        console.error('特定日キャパシティ削除エラー:', error);
+        res.status(500).json({ error: 'キャパシティ設定の削除に失敗しました' });
+    }
+});
+
 // ===== サービス（メニュー）管理API =====
 
 // サービス一覧（管理者用）
