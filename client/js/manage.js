@@ -2553,6 +2553,7 @@ async function createAppointment() {
         closeCreateModal();
         loadCalendar();
         loadAppointments();
+        loadPatients();
 
     } catch (error) {
         alert(error.message);
