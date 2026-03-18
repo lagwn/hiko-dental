@@ -350,6 +350,9 @@ function setupEventListeners() {
     });
     document.getElementById('prevStep5').addEventListener('click', () => goToStep(4));
     document.getElementById('submitBooking').addEventListener('click', submitBooking);
+
+    // 電話番号入力後に既存患者情報を照合して自動補完
+    document.getElementById('phone').addEventListener('blur', lookupPatientByPhone);
 }
 
 // ===== ステップ管理 =====
@@ -639,6 +642,33 @@ function showError(message) {
 
 function hideError() {
     elements.globalError.style.display = 'none';
+}
+
+// ===== 電話番号照合による自動補完 =====
+async function lookupPatientByPhone() {
+    const phone = document.getElementById('phone').value.trim();
+    const cleanPhone = phone.replace(/[-\s]/g, '');
+    if (!/^0\d{9,10}$/.test(cleanPhone)) return; // 形式が不完全な場合はスキップ
+
+    try {
+        const result = await api(`/api/patients/lookup?phone=${encodeURIComponent(cleanPhone)}`);
+        if (!result.found) return;
+
+        // 各フィールドを上書き補完
+        if (result.name)    document.getElementById('name').value    = result.name;
+        if (result.kana)    document.getElementById('kana').value    = result.kana;
+        if (result.email)   document.getElementById('email').value   = result.email;
+        if (result.address) document.getElementById('address').value = result.address;
+
+        // 補完バナーを表示
+        const banner = document.getElementById('savedInfoBanner');
+        if (banner) {
+            banner.querySelector('span').textContent = '✓ 登録済みの情報が自動入力されました';
+            banner.style.display = 'flex';
+        }
+    } catch (e) {
+        // 照合失敗は無視（新規患者として手入力してもらう）
+    }
 }
 
 // ===== 患者情報の自動入力（localStorage） =====

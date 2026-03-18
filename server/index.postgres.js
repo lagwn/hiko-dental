@@ -77,6 +77,13 @@ const bookingLimiter = rateLimit({
     message: { error: 'リクエストが多すぎます。しばらく待ってから再度お試しください。' }
 });
 
+// 電話番号照合用レートリミット（1IPあたり1分間に20回まで）
+const lookupLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 20,
+    message: { error: 'リクエストが多すぎます。しばらく待ってから再度お試しください。' }
+});
+
 // 静的ファイル
 app.use(express.static(path.join(__dirname, '..', 'client')));
 
@@ -423,6 +430,31 @@ app.post('/api/appointments', bookingLimiter, async (req, res) => {
     } catch (error) {
         console.error('予約作成エラー:', error);
         res.status(500).json({ error: '予約の作成に失敗しました' });
+    }
+});
+
+// 電話番号で既存患者情報を照合（2回目以降の自動入力用）
+app.get('/api/patients/lookup', lookupLimiter, async (req, res) => {
+    try {
+        const { phone } = req.query;
+        if (!phone) return res.status(400).json({ error: '電話番号が必要です' });
+
+        const cleanPhone = phone.replace(/[-\s]/g, '');
+        if (!/^0\d{9,10}$/.test(cleanPhone)) {
+            return res.status(400).json({ error: '有効な電話番号を入力してください' });
+        }
+
+        const patient = await db.queryOne(
+            'SELECT name, kana, email, address FROM patients WHERE phone = $1',
+            [cleanPhone]
+        );
+
+        if (!patient) return res.json({ found: false });
+        res.json({ found: true, name: patient.name, kana: patient.kana, email: patient.email || '', address: patient.address || '' });
+
+    } catch (error) {
+        console.error('患者照合エラー:', error);
+        res.status(500).json({ error: '照合に失敗しました' });
     }
 });
 
