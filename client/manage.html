@@ -426,34 +426,44 @@
             border-top: 2px solid var(--accent);
         }
         /* ===== 通知バッジ ===== */
+        #notificationWidget {
+            position: fixed;
+            top: 16px;
+            right: 16px;
+            z-index: 9999;
+        }
         #notificationBell {
             position: relative;
-            background: none;
+            background: #fff;
             border: none;
+            border-radius: 50%;
+            width: 48px;
+            height: 48px;
             cursor: pointer;
-            padding: 4px 8px;
-            color: rgba(255,255,255,0.85);
-            font-size: 1.3rem;
-            line-height: 1;
             display: flex;
             align-items: center;
+            justify-content: center;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.18);
+            font-size: 1.4rem;
         }
+        #notificationBell:hover { background: #f3f4f6; }
         #notificationBadge {
             position: absolute;
-            top: 0;
-            right: 2px;
+            top: -4px;
+            right: -4px;
             background: #ef4444;
             color: #fff;
-            font-size: 0.65rem;
+            font-size: 0.68rem;
             font-weight: 700;
-            min-width: 16px;
-            height: 16px;
-            border-radius: 8px;
+            min-width: 20px;
+            height: 20px;
+            border-radius: 10px;
             display: none;
             align-items: center;
             justify-content: center;
-            padding: 0 3px;
+            padding: 0 4px;
             line-height: 1;
+            border: 2px solid #fff;
         }
         #notificationDropdown {
             display: none;
@@ -465,7 +475,6 @@
             border: 1px solid var(--border);
             border-radius: 8px;
             box-shadow: 0 8px 24px rgba(0,0,0,0.15);
-            z-index: 9999;
             overflow: hidden;
         }
         #notificationDropdown.open { display: block; }
@@ -507,6 +516,16 @@
 </head>
 
 <body>
+    <div id="notificationWidget">
+        <button id="notificationBell" title="新着予約通知">🔔<span id="notificationBadge"></span></button>
+        <div id="notificationDropdown">
+            <div class="notif-header">
+                新着予約
+                <button class="notif-clear" id="notifClearBtn">すべて既読</button>
+            </div>
+            <div id="notifList"></div>
+        </div>
+    </div>
     <div class="page">
         <!-- ログイン画面 -->
         <div id="loginView" class="login-container">
@@ -541,18 +560,6 @@
                             style="font-weight: 400; font-size: 0.875rem; color: white;">管理画面</span></a>
                     <div class="admin-nav">
                         <span id="adminName" style="color: rgba(255,255,255,0.7);"></span>
-                        <div style="position: relative;">
-                            <button id="notificationBell" title="新着予約通知">🔔
-                                <span id="notificationBadge"></span>
-                            </button>
-                            <div id="notificationDropdown">
-                                <div class="notif-header">
-                                    新着予約
-                                    <button class="notif-clear" id="notifClearBtn">すべて既読</button>
-                                </div>
-                                <div id="notifList"></div>
-                            </div>
-                        </div>
                         <button id="logoutBtn" class="btn btn-secondary"
                             style="padding: 8px 16px; font-size: 0.875rem;">ログアウト</button>
                     </div>
