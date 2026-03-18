@@ -2554,8 +2554,6 @@ async function createAppointment() {
         loadCalendar();
         loadAppointments();
 
-        alert('予約を登録しました');
-
     } catch (error) {
         alert(error.message);
     } finally {
